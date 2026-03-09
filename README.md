@@ -1,36 +1,49 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# The Crazy Game
 
-## Getting Started
+A decentralized last-bettor-wins game built on Solana.
 
-First, run the development server:
+## How It Works
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Each game has a pool and a countdown timer. Players place bets to earn ROI — when enough bets accumulate, early players can withdraw their returns. The last player to bet before the timer runs out wins the entire remaining pool as the jackpot.
+
+- **Place a bet** — contribute to the pool and start accumulating ROI
+- **Withdraw** — once your ROI target is reached, withdraw your returns at any time
+- **Win the jackpot** — be the last bettor when the timer expires
+
+## Game Modes
+
+- **Vanilla** — timer resets to full on each bet
+- **Cumulative** — each bet adds a fixed amount of time
+- **Random** — each bet adds a random amount of time (VRF)
+
+## Repository Structure
+
+```
+/                   — Next.js frontend
+contract/           — Solana smart contract (Rust/Anchor)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Tech Stack
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+- **Frontend:** Next.js, Solana Wallet Adapter
+- **Smart Contract:** Rust, Anchor Framework
+- **Chain:** Solana
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Smart Contract
 
-## Learn More
+The contract is fully open source. Core mechanics:
 
-To learn more about Next.js, take a look at the following resources:
+- O(1) ROI calculation via cumulative accounting
+- Reserved balance system to protect player funds from jackpot claims
+- 5-minute jackpot delay after timer expiry
+- Permissionless `reserve_roi` instruction
+- Platform fee: 1% (USDC)
+- Host fee: 1-5% (set by game host)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Links
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- [Play](https://thecrazygame.com) — coming soon
+- [Leaderboard](https://thecrazygame.com/leaderboard) — coming soon
 
-## Deploy on Vercel
+## License
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
