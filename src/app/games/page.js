@@ -92,10 +92,10 @@ onClick={() => window.location.href = `/games/${game.game_number}`}
         </div>
 
         <div style={{ fontFamily: 'var(--font-display)', fontSize: '42px', color: 'var(--text-primary)', marginBottom: '4px' }}>
-          {formatAmount(game.pool_balance)}
+          {formatAmount(Math.max(0, parseInt(game.pool_balance) - (parseInt(game.reserved_balance) || 0)))}
         </div>
         <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px', letterSpacing: '0.05em' }}>
-          USDC IN POOL
+          JACKPOT
         </div>
 
         <div style={{ marginBottom: '20px' }}>
