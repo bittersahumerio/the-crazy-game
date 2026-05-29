@@ -383,58 +383,26 @@ export default function ClaroscuroPage() {
   }
 
   async function payAllForWeek(weekId, totalOwedRaw, unpaidCount) {
-    if (!connected || !publicKey) return alert('Connect your treasury wallet first.');
-    if (!sendTransaction) return alert('Wallet does not support sendTransaction');
     const totalUsd = (Number(totalOwedRaw) / 1_000_000).toFixed(2);
-    if (!confirm('Pay ' + unpaidCount + ' winner(s) totaling $' + totalUsd + ' USDC? Funds come from the connected wallet.')) return;
+    if (!confirm('Pay ' + unpaidCount + ' winner(s) totaling $' + totalUsd + ' USDC from the treasury?')) return;
 
     setPayoutBusy(weekId);
-    setPayoutProgress({ done: 0, total: unpaidCount });
-
     try {
-      const { entries } = await adminFetch('/leaderboard/unpaid/' + weekId);
-      if (!entries || entries.length === 0) { alert('Nothing to pay.'); setPayoutBusy(null); return; }
-
-      const sourceATA = await getAssociatedTokenAddress(TOKEN_MINT, publicKey);
-      const BATCH = 4;   // ~4 transfers + ATA-creates per legacy tx (~1232 byte cap)
-      let done = 0;
-
-      for (let i = 0; i < entries.length; i += BATCH) {
-        const batch = entries.slice(i, i + BATCH);
-        const tx = new Transaction();
-
-        for (const entry of batch) {
-          const recipient = new PublicKey(entry.player);
-          const recipientATA = await getAssociatedTokenAddress(TOKEN_MINT, recipient);
-          tx.add(
-            createAssociatedTokenAccountIdempotentInstruction(publicKey, recipientATA, recipient, TOKEN_MINT)
-          );
-          tx.add(
-            createTransferInstruction(sourceATA, recipientATA, publicKey, BigInt(entry.reward))
-          );
-        }
-
-        const sig = await sendTransaction(tx, connection);
-        await connection.confirmTransaction(sig, 'confirmed');
-
-        for (const entry of batch) {
-          await adminFetch('/leaderboard/mark-paid', {
-            method: 'POST',
-            body: JSON.stringify({ entry_id: entry.id, tx_signature: sig }),
-          });
-          done++;
-          setPayoutProgress({ done, total: entries.length });
-        }
+      const r = await adminFetch('/leaderboard/pay-week', {
+        method: 'POST',
+        body: JSON.stringify({ week_id: weekId }),
+      });
+      if (r.failures && r.failures.length > 0) {
+        alert('Paid ' + r.paid + '/' + r.total + '. ' + r.failures.length + ' failed (you can retry). First error: ' + (r.failures[0].error || 'unknown'));
+      } else {
+        alert('Paid all ' + r.paid + ' winner(s) from the treasury.');
       }
-
-      alert('All ' + entries.length + ' winners paid.');
       loadTab('LEADERBOARD');
     } catch (e) {
-      alert('Payout failed at winner ' + (payoutProgress.done + 1) + ': ' + e.message + '. Unpaid winners stay marked unpaid — you can retry.');
+      alert('Payout failed: ' + (e.message || e) + '. Unconfirmed winners stay unpaid — you can retry.');
       loadTab('LEADERBOARD');
     } finally {
       setPayoutBusy(null);
-      setPayoutProgress({ done: 0, total: 0 });
     }
   }
 
@@ -492,7 +460,7 @@ export default function ClaroscuroPage() {
                             disabled={isBusy || payoutBusy !== null}
                             onClick={() => payAllForWeek(w.id, w.unpaid_amount, w.unpaid_count)}
                           >
-                            {isBusy ? ('PAYING ' + payoutProgress.done + '/' + payoutProgress.total) : ('PAY ' + w.unpaid_count + ' ($' + unpaidUsd + ')')}
+                            {isBusy ? 'PAYING…' : ('PAY ' + w.unpaid_count + ' ($' + unpaidUsd + ')')}
                           </button>
                         ) : (
                           <span style={{ color: 'var(--accent)', fontSize: '11px', letterSpacing: '0.05em' }}>✓ ALL PAID</span>
@@ -544,11 +512,9 @@ export default function ClaroscuroPage() {
                 })}
               </tbody>
             </table>
-            {!connected && (
-              <div style={{ marginTop: '12px', padding: '12px', border: '1px solid var(--accent-red)', color: 'var(--accent-red)', fontSize: '12px' }}>
-                ⚠ Connect your treasury wallet (top-right) to enable payouts.
-              </div>
-            )}
+            <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
+              Payouts are sent server-side from the treasury wallet — no browser wallet needed.
+            </div>
           </div>
         )}
       </div>
