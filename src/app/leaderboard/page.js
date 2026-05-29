@@ -281,7 +281,7 @@ export default function LeaderboardPage() {
                 <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                   <div style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: 'var(--text-primary)', letterSpacing: '0.05em' }}>LAST WEEK</div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                    {getWeekDates(data.lastWeek.week.week_start, data.lastWeek.week.week_end)} · ${((parseInt(data.lastWeek.week.pot_amount) || 0) / 2 / 1_000_000).toFixed(2)} paid out
+                    {getWeekDates(data.lastWeek.week.week_start, data.lastWeek.week.week_end)} · ${(data.lastWeek.entries.reduce((s, e) => s + (parseInt(e.reward) || 0), 0) / 1_000_000).toFixed(2)} paid out
                   </div>
                 </div>
                 <div className="scroll-x">
