@@ -67,7 +67,8 @@ export default function LeaderboardPage() {
       const res = await fetch(`${API_URL}/api/leaderboard`);
       const json = await res.json();
       setData(json);
-      if (json.entries) fetchUsernames(json.entries);
+      const allPlayers = [...(json.entries || []), ...((json.lastWeek && json.lastWeek.entries) || [])];
+      if (allPlayers.length) fetchUsernames(allPlayers);
     } catch (e) {
       console.error(e);
     } finally {
@@ -273,6 +274,40 @@ export default function LeaderboardPage() {
               )}
               </div>
             </div>
+
+            {/* Last week's final results */}
+            {data.lastWeek?.entries?.length > 0 && (
+              <div style={{ marginTop: '32px', border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+                <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: 'var(--text-primary)', letterSpacing: '0.05em' }}>LAST WEEK</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {getWeekDates(data.lastWeek.week.week_start, data.lastWeek.week.week_end)} · ${((parseInt(data.lastWeek.week.pot_amount) || 0) / 2 / 1_000_000).toFixed(2)} paid out
+                  </div>
+                </div>
+                <div className="scroll-x">
+                  <div className="lb-row" style={{ display: 'grid', gridTemplateColumns: '60px 1fr 140px 120px', padding: '12px 24px', borderBottom: '1px solid var(--border)', fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>
+                    <span>RANK</span>
+                    <span>PLAYER</span>
+                    <span style={{ textAlign: 'right' }}>SCOVILLES</span>
+                    <span style={{ textAlign: 'right' }}>WON</span>
+                  </div>
+                  {data.lastWeek.entries.map((entry) => {
+                    const r = parseInt(entry.rank);
+                    const won = (parseInt(entry.reward) || 0) / 1_000_000;
+                    return (
+                      <div key={entry.player} className="lb-row" style={{ display: 'grid', gridTemplateColumns: '60px 1fr 140px 120px', padding: '14px 24px', borderBottom: '1px solid var(--border)', alignItems: 'center', background: r <= 3 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
+                        <span style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: r <= 3 ? MEDAL_COLORS[r - 1] : 'var(--text-muted)' }}>{r}</span>
+                        <Link href={usernames[entry.player] ? `/profile/${usernames[entry.player]}` : '#'} style={{ fontSize: '13px', color: 'var(--text-primary)', textDecoration: 'none' }}>
+                          {usernames[entry.player] ? `@${usernames[entry.player]}` : shortAddress(entry.player)}
+                        </Link>
+                        <span style={{ fontSize: '13px', textAlign: 'right', color: 'var(--accent)' }}>{Math.floor(parseInt(entry.fees_paid) / 10000)}</span>
+                        <span style={{ fontSize: '13px', textAlign: 'right', color: won > 0 ? 'var(--accent)' : 'var(--text-muted)' }}>{won > 0 ? `$${won.toFixed(2)}` : '—'}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* How it works */}
             <div style={{ marginTop: '32px', border: '1px solid var(--border)', padding: '24px', background: 'var(--bg-card)', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.8 }}>
