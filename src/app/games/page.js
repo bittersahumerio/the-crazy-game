@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Navbar from '@/components/Navbar';
+import TypeBadge, { timerBadgeKind, modeBadgeKind } from '@/components/TypeBadge';
+import HowToPlay from '@/components/HowToPlay';
 import Link from 'next/link';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -47,17 +49,22 @@ function GameCard({ game }) {
           e.currentTarget.style.background = 'var(--bg-card-hover)';
         }}
         onMouseLeave={e => {
-          e.currentTarget.style.borderColor = 'var(--border)';
-          e.currentTarget.style.background = 'var(--bg-card)';
-        }}
+  e.currentTarget.style.borderColor = 'var(--border)';
+  e.currentTarget.style.background = 'var(--bg-card)';
+}}
+onClick={() => window.location.href = `/games/${game.game_number}`}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <div>
             <div style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600', marginBottom: '2px' }}>
               {game.name || `GAME #${String(game.game_number).padStart(4, '0')}`}
             </div>
-            <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>
-              #{String(game.game_number).padStart(4, '0')}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>
+                #{String(game.game_number).padStart(4, '0')}
+              </span>
+              <TypeBadge kind={timerBadgeKind(game)} size={18} />
+              <TypeBadge kind={modeBadgeKind(game)} size={18} />
             </div>
             <div style={{ fontSize: '10px', marginTop: '2px' }}>
               {game.host_username ? (
@@ -101,11 +108,12 @@ function GameCard({ game }) {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+        <div className="grid-stats-4" style={{ gap: '8px' }}>
           {[
             { label: 'MIN BET', value: `$${formatAmount(game.min_bet)}` },
             { label: 'ROI', value: `${(game.roi_bps / 100).toFixed(0)}%` },
             { label: 'BETS', value: game.bet_count || '—' },
+            { label: 'TIMER', value: parseInt(game.timer_mode) === 1 ? `+${Math.round(parseInt(game.time_increment) / 60)}m/bet` : `${Math.round(parseInt(game.timer_duration) / 60)}m reset` },
           ].map(stat => (
             <div key={stat.label} style={{ background: 'var(--bg)', padding: '10px', textAlign: 'center' }}>
               <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--accent)', marginBottom: '2px' }}>{stat.value}</div>
@@ -117,7 +125,8 @@ function GameCard({ game }) {
   );
 }
 
-const TIMER_MODE_LABELS = { '': 'ANY', '0': 'VANILLA', '1': 'CUMULATIVE', '2': 'RANDOM' };
+const TIMER_MODE_LABELS = { '': 'ANY', '0': 'FIXED', '1': 'CUMULATIVE', '2': 'RANDOM' };
+const SALVADOR_MODE_LABELS = { '': 'ANY', '0': 'VANILLA', '1': 'SALVADOR — FIXED', '2': 'SALVADOR — PROGRESSIVE' };
 
 const inputStyle = {
   width: '100%',
@@ -149,6 +158,7 @@ export default function GamesPage() {
     min_min_bet: '',
     max_min_bet: '',
     timer_mode: '',
+    salvador_mode: '',
   });
   const [appliedFilters, setAppliedFilters] = useState({});
 
@@ -156,7 +166,7 @@ export default function GamesPage() {
     setGames([]);
     setOffset(0);
     fetchGames(0, true, appliedFilters);
-    const interval = setInterval(() => fetchGames(0, true, appliedFilters), 10_000);
+    const interval = setInterval(() => fetchGames(0, true, appliedFilters), 300_000);
     return () => clearInterval(interval);
   }, [sort, tab, appliedFilters]);
 
@@ -178,6 +188,7 @@ export default function GamesPage() {
     if (f.max_pool) params.set('max_pool', f.max_pool);
     if (f.max_min_bet) params.set('max_min_bet', f.max_min_bet);
     if (f.timer_mode !== '') params.set('timer_mode', f.timer_mode);
+    if (f.salvador_mode !== '') params.set('salvador_mode', f.salvador_mode);
     return params;
   }
 
@@ -194,6 +205,7 @@ export default function GamesPage() {
       if (currentFilters.min_min_bet) params.set('min_min_bet', currentFilters.min_min_bet);
       if (currentFilters.max_min_bet) params.set('max_min_bet', currentFilters.max_min_bet);
       if (currentFilters.timer_mode !== undefined && currentFilters.timer_mode !== '') params.set('timer_mode', currentFilters.timer_mode);
+      if (currentFilters.salvador_mode !== undefined && currentFilters.salvador_mode !== '') params.set('salvador_mode', currentFilters.salvador_mode);
 
       const res = await fetch(`${API_URL}/api/games?${params.toString()}`);
       const data = await res.json();
@@ -214,7 +226,7 @@ export default function GamesPage() {
   }
 
   function clearFilters() {
-    const empty = { name: '', min_pool: '', max_pool: '', min_min_bet: '', max_min_bet: '', timer_mode: '' };
+    const empty = { name: '', min_pool: '', max_pool: '', min_min_bet: '', max_min_bet: '', timer_mode: '', salvador_mode: '' };
     setFilters(empty);
     setAppliedFilters({});
     setOffset(0);
@@ -238,7 +250,8 @@ export default function GamesPage() {
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: '24px' }}>
-            <h1 style={{ fontSize: '64px', lineHeight: 1 }}>GAMES</h1>
+            <h1 className="h-display-lg">GAMES</h1>
+            <div style={{ marginBottom: '8px' }}><HowToPlay /></div>
             <div style={{ display: 'flex', marginBottom: '8px' }}>
               {[{ label: 'LIVE', value: 'active' }, { label: 'ENDED', value: 'ended' }].map(t => (
                 <button key={t.value} onClick={() => setTab(t.value)} style={{
@@ -362,6 +375,19 @@ export default function GamesPage() {
                   style={{ ...inputStyle, cursor: 'pointer' }}
                 >
                   {Object.entries(TIMER_MODE_LABELS).map(([val, label]) => (
+                    <option key={val} value={val}>{label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em', marginBottom: '6px' }}>GAME MODE</div>
+                <select
+                  value={filters.salvador_mode}
+                  onChange={e => setFilters(f => ({ ...f, salvador_mode: e.target.value }))}
+                  style={{ ...inputStyle, cursor: 'pointer' }}
+                >
+                  {Object.entries(SALVADOR_MODE_LABELS).map(([val, label]) => (
                     <option key={val} value={val}>{label}</option>
                   ))}
                 </select>

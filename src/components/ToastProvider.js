@@ -7,16 +7,16 @@ export default function ToastProvider() {
       position="bottom-right"
       toastOptions={{
         style: {
-          background: '#1a1a1a',
-          color: '#fff',
-          border: '1px solid #333',
+          background: 'var(--bg-card)',
+          color: 'var(--text-primary)',
+          border: '1px solid var(--border)',
           fontFamily: 'var(--font-body)',
         },
         success: {
-          iconTheme: { primary: '#00ff88', secondary: '#000' },
+          iconTheme: { primary: 'var(--accent)', secondary: '#000' },
         },
         error: {
-          iconTheme: { primary: '#ff4444', secondary: '#000' },
+          iconTheme: { primary: 'var(--accent-red)', secondary: '#fff' },
         },
       }}
     />

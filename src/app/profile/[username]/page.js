@@ -24,6 +24,10 @@ export default function PublicProfilePage() {
   const { username } = useParams();
   const [profile, setProfile] = useState(null);
   const [bets, setBets] = useState([]);
+  const [betsTotal, setBetsTotal] = useState(0);
+  const [betsOffset, setBetsOffset] = useState(0);
+  const [betsLoading, setBetsLoading] = useState(false);
+  const [profileWallet, setProfileWallet] = useState(null);
   const [stats, setStats] = useState(null);
   const [gamesHosted, setGamesHosted] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -43,9 +47,12 @@ export default function PublicProfilePage() {
       const userData = await userRes.json();
       setProfile(userData.user);
 
-      const playerRes = await fetch(`${API_URL}/api/players/${userData.user.wallet}`);
+      setProfileWallet(userData.user.wallet);
+      const playerRes = await fetch(`${API_URL}/api/players/${userData.user.wallet}?limit=50&offset=0`);
       const playerData = await playerRes.json();
-      setBets(playerData.bets || []);
+      const fetchedBets = playerData.bets || [];
+      setBets(fetchedBets);
+      setBetsTotal(parseInt(fetchedBets[0]?.total_count || 0));
       setStats(playerData.stats);
       setGamesHosted(playerData.games_hosted || []);
     } catch (e) {
@@ -79,6 +86,18 @@ export default function PublicProfilePage() {
         </main>
       </>
     );
+  }
+
+  async function loadMoreBets() {
+    setBetsLoading(true);
+    try {
+      const newOffset = betsOffset + 50;
+      const res = await fetch(`${API_URL}/api/players/${profileWallet}?limit=50&offset=${newOffset}`);
+      const data = await res.json();
+      setBets(prev => [...prev, ...(data.bets || [])]);
+      setBetsOffset(newOffset);
+    } catch (e) { console.error(e); }
+    setBetsLoading(false);
   }
 
   if (notFound) {
@@ -141,7 +160,7 @@ export default function PublicProfilePage() {
         {/* Tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: '24px' }}>
           {[
-            { key: 'history', label: `BET HISTORY (${bets.length})` },
+            { key: 'history', label: `BET HISTORY (${betsTotal || bets.length})` },
             { key: 'hosted', label: `GAMES HOSTED (${gamesHosted.length})` },
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)} style={{
@@ -184,6 +203,11 @@ export default function PublicProfilePage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+            {betsTotal > bets.length && (
+              <div style={{ textAlign: 'center', marginTop: '16px' }}>
+                <button onClick={loadMoreBets} disabled={betsLoading} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-secondary)', padding: '10px 32px', cursor: betsLoading ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)', fontSize: '12px', letterSpacing: '0.08em' }}>{betsLoading ? 'LOADING...' : `LOAD MORE (${bets.length}/${betsTotal})`}</button>
               </div>
             )}
           </div>

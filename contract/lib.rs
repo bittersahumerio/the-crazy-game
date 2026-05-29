@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Token, TokenAccount, Transfer, CloseAccount};
 
-declare_id!("BcXdHwCZsXva93X92wV8S9jPJUnsu4XSiNGFwhCNcjuz");
+declare_id!("craz6HFVmz7Nuk9nSD6sxH4nbXXKF1bNPjjN3dmG4FJ");
 
 // Constants
 const JACKPOT_DELAY: i64 = 300; // 5 minutes after timer expires
@@ -22,8 +22,10 @@ pub mod crazy_game_vanilla {
         require!(default_fee_bps <= 1000, GameError::InvalidFee); // max 10%
         let config = &mut ctx.accounts.config;
         config.admin = ctx.accounts.admin.key();
+        config.operator = ctx.accounts.admin.key(); // default operator = admin
         config.default_fee_bps = default_fee_bps;
         config.token_fees = Vec::new();
+        config.is_paused = false;
         config.bump = ctx.bumps.config;
         Ok(())
     }
@@ -32,7 +34,7 @@ pub mod crazy_game_vanilla {
         ctx: Context<UpdateConfig>,
         default_fee_bps: u16,
     ) -> Result<()> {
-        require!(default_fee_bps <= 1000, GameError::InvalidFee); // max 10%
+        require!(default_fee_bps <= 1000, GameError::InvalidFee);
         ctx.accounts.config.default_fee_bps = default_fee_bps;
         Ok(())
     }
@@ -42,10 +44,8 @@ pub mod crazy_game_vanilla {
         mint: Pubkey,
         fee_bps: u16,
     ) -> Result<()> {
-        require!(fee_bps <= 1000, GameError::InvalidFee); // max 10%
+        require!(fee_bps <= 1000, GameError::InvalidFee);
         let config = &mut ctx.accounts.config;
-
-        // Update existing or add new
         if let Some(entry) = config.token_fees.iter_mut().find(|e| e.mint == mint) {
             entry.fee_bps = fee_bps;
         } else {
@@ -59,8 +59,42 @@ pub mod crazy_game_vanilla {
         ctx: Context<UpdateConfig>,
         mint: Pubkey,
     ) -> Result<()> {
-        let config = &mut ctx.accounts.config;
-        config.token_fees.retain(|e| e.mint != mint);
+        ctx.accounts.config.token_fees.retain(|e| e.mint != mint);
+        Ok(())
+    }
+
+    pub fn set_operator(
+        ctx: Context<UpdateConfig>,
+        operator: Pubkey,
+    ) -> Result<()> {
+        ctx.accounts.config.operator = operator;
+        Ok(())
+    }
+
+    pub fn pause_platform(ctx: Context<UpdateConfig>) -> Result<()> {
+        ctx.accounts.config.is_paused = true;
+        Ok(())
+    }
+
+    pub fn unpause_platform(ctx: Context<UpdateConfig>) -> Result<()> {
+        ctx.accounts.config.is_paused = false;
+        Ok(())
+    }
+
+    pub fn close_config(ctx: Context<CloseConfig>) -> Result<()> {
+        let config_info = ctx.accounts.config.to_account_info();
+        let admin_info = ctx.accounts.admin.to_account_info();
+        let data = config_info.try_borrow_data()?;
+        let stored_admin = Pubkey::try_from(&data[8..40]).map_err(|_| GameError::Unauthorized)?;
+        require!(stored_admin == admin_info.key(), GameError::Unauthorized);
+        drop(data);
+        let lamports = config_info.lamports();
+        **config_info.try_borrow_mut_lamports()? = 0;
+        **admin_info.try_borrow_mut_lamports()? += lamports;
+        let mut data = config_info.try_borrow_mut_data()?;
+        for byte in data.iter_mut() {
+            *byte = 0;
+        }
         Ok(())
     }
 
@@ -79,29 +113,25 @@ pub mod crazy_game_vanilla {
         timer_mode: u8,
         time_increment: i64,
     ) -> Result<()> {
-        // Validations
+        require!(!ctx.accounts.config.is_paused, GameError::PlatformPaused);
         require!(name.len() >= 3 && name.len() <= 30, GameError::InvalidName);
         require!(initial_deposit > 0, GameError::InvalidDeposit);
         require!(min_bet > 0 && min_bet <= initial_deposit, GameError::InvalidMinBet);
-        require!(roi_bps >= 1000 && roi_bps <= 100000, GameError::InvalidRoi);
+        require!(roi_bps >= 1000 && roi_bps <= 10000, GameError::InvalidRoi);
         require!(timer_duration >= 60 && timer_duration <= 86400, GameError::InvalidTimer);
         require!(host_fee_bps >= 100 && host_fee_bps <= 500, GameError::InvalidHostFee);
         require!(timer_mode <= 2, GameError::InvalidTimerMode);
 
-        // Farming protection
         let farm_check = (initial_deposit / min_bet) * roi_bps;
         require!(farm_check >= 3000, GameError::FarmingProtection);
 
-        // Get platform fee from config (per-token override or default)
         let token_mint = ctx.accounts.token_mint.key();
         let platform_fee_bps = ctx.accounts.config
-            .token_fees
-            .iter()
+            .token_fees.iter()
             .find(|e| e.mint == token_mint)
             .map(|e| e.fee_bps as u64)
             .unwrap_or(ctx.accounts.config.default_fee_bps as u64);
 
-        // Calculate fees
         let platform_fee = initial_deposit * platform_fee_bps / 10000;
         let net_deposit = initial_deposit - platform_fee;
 
@@ -155,20 +185,24 @@ pub mod crazy_game_vanilla {
         game.bet_count = 0;
         game.active_bet_count = 0;
         game.is_active = true;
+        game.is_paused = false;
         game.jackpot_claimed = false;
         game.platform_fees_collected = platform_fee;
+        game.host_vault = ctx.accounts.host_token_account.key();
         game.bump = ctx.bumps.game;
 
-        // Record host's initial bet
+        // Host's initial bet (not queued — game creation is always solo)
         let bet = &mut ctx.accounts.initial_bet;
         bet.game = game.key();
         bet.player = ctx.accounts.host.key();
         bet.bet_index = 0;
+        bet.bet_seed = 0;
         bet.amount = initial_deposit;
         bet.net_amount = net_deposit;
         bet.roi_target = net_deposit + (net_deposit * roi_bps / 10000);
         bet.accumulated_base = net_deposit;
         bet.cumulative_at_join = 0;
+        bet.is_pending = false;
         bet.reserved = false;
         bet.withdrawn = false;
         bet.bump = ctx.bumps.initial_bet;
@@ -194,65 +228,171 @@ pub mod crazy_game_vanilla {
         Ok(())
     }
 
-    pub fn place_bet(ctx: Context<PlaceBet>, amount: u64) -> Result<()> {
-        let game = &mut ctx.accounts.game;
+    // ============================================================
+    // PLACE BET — Player queues a bet. NO writes to game account.
+    // Tokens go to a per-bet escrow so even vault deposits don't conflict.
+    // ============================================================
 
+    pub fn place_bet(ctx: Context<PlaceBet>, amount: u64, _bet_seed: u64) -> Result<()> {
+        let game = &ctx.accounts.game; // read-only!
+
+        require!(!ctx.accounts.config.is_paused, GameError::PlatformPaused);
+        require!(!game.is_paused, GameError::GamePaused);
         require!(game.is_active, GameError::GameNotActive);
         require!(amount >= game.min_bet, GameError::BetTooSmall);
 
         let now = Clock::get()?.unix_timestamp;
         require!(now < game.timer_end, GameError::TimerExpired);
 
-        // Use platform_fee_bps stored at game creation time
-        let platform_fee = amount * game.platform_fee_bps / 10000;
-        let host_fee = amount * game.host_fee_bps / 10000;
-        let net_amount = amount - platform_fee - host_fee;
-        // Transfer net amount to game vault
+        // Transfer full amount to per-bet escrow (NOT the shared vault)
         token::transfer(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
                 Transfer {
                     from: ctx.accounts.player_token_account.to_account_info(),
-                    to: ctx.accounts.game_vault.to_account_info(),
+                    to: ctx.accounts.escrow.to_account_info(),
                     authority: ctx.accounts.player.to_account_info(),
                 },
+            ),
+            amount,
+        )?;
+
+        // Create bet in pending state — will be filled by process_bet
+        let bet = &mut ctx.accounts.bet;
+        bet.game = game.key();
+        bet.player = ctx.accounts.player.key();
+        bet.bet_index = 0; // set by process_bet
+        bet.bet_seed = _bet_seed;
+        bet.amount = amount;
+        bet.net_amount = 0; // set by process_bet
+        bet.roi_target = 0; // set by process_bet
+        bet.accumulated_base = 0;
+        bet.cumulative_at_join = 0; // set by process_bet
+        bet.is_pending = true;
+        bet.reserved = false;
+        bet.withdrawn = false;
+        bet.bump = ctx.bumps.bet;
+
+        emit!(BetQueued {
+            game: game.key(),
+            player: ctx.accounts.player.key(),
+            bet_seed: _bet_seed,
+            amount,
+        });
+
+        Ok(())
+    }
+
+    // ============================================================
+    // PROCESS BET — Operator (indexer) processes a queued bet.
+    // This is the only instruction that writes to the game account
+    // for bet processing, so there are ZERO write conflicts.
+    // ============================================================
+
+    pub fn process_bet(ctx: Context<ProcessBet>) -> Result<()> {
+        let game = &mut ctx.accounts.game;
+        let bet = &mut ctx.accounts.bet;
+
+        require!(bet.is_pending, GameError::BetNotPending);
+        require!(game.is_active, GameError::GameNotActive);
+
+        let amount = bet.amount;
+
+        // Calculate fees using game's stored fee rates
+        let platform_fee = amount * game.platform_fee_bps / 10000;
+        let host_fee = amount * game.host_fee_bps / 10000;
+        let net_amount = amount - platform_fee - host_fee;
+
+        let game_host = game.host;
+        let game_name = game.name.clone();
+        let game_bump = game.bump;
+        let seeds = &[
+            b"game".as_ref(),
+            game_host.as_ref(),
+            game_name.as_bytes(),
+            &[game_bump],
+        ];
+
+        // Transfer net amount from escrow to game vault
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.escrow.to_account_info(),
+                    to: ctx.accounts.game_vault.to_account_info(),
+                    authority: game.to_account_info(),
+                },
+                &[seeds],
             ),
             net_amount,
         )?;
 
-        // Transfer platform fee to platform vault
+        // Transfer platform fee from escrow to platform vault
         token::transfer(
-            CpiContext::new(
+            CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
                 Transfer {
-                    from: ctx.accounts.player_token_account.to_account_info(),
+                    from: ctx.accounts.escrow.to_account_info(),
                     to: ctx.accounts.platform_vault.to_account_info(),
-                    authority: ctx.accounts.player.to_account_info(),
+                    authority: game.to_account_info(),
                 },
+                &[seeds],
             ),
             platform_fee,
         )?;
 
-        // Transfer host fee to host vault
-        token::transfer(
-            CpiContext::new(
+        // Transfer host fee from escrow to host vault (or game vault if closed)
+        if ctx.accounts.host_vault.to_account_info().lamports() > 0 {
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.escrow.to_account_info(),
+                        to: ctx.accounts.host_vault.to_account_info(),
+                        authority: game.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                host_fee,
+            )?;
+        } else {
+            // Host token account closed — redirect to game vault
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.escrow.to_account_info(),
+                        to: ctx.accounts.game_vault.to_account_info(),
+                        authority: game.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                host_fee,
+            )?;
+            game.pool_balance += host_fee;
+        }
+
+        // Close escrow, return rent to player
+        token::close_account(
+            CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.player_token_account.to_account_info(),
-                    to: ctx.accounts.host_vault.to_account_info(),
-                    authority: ctx.accounts.player.to_account_info(),
+                CloseAccount {
+                    account: ctx.accounts.escrow.to_account_info(),
+                    destination: ctx.accounts.bettor.to_account_info(),
+                    authority: game.to_account_info(),
                 },
+                &[seeds],
             ),
-            host_fee,
         )?;
 
-        // Update cumulative per bet (O(1) ROI calculation)
+        // Update game state (O(1) ROI calculation)
         game.cumulative_per_bet = game.cumulative_per_bet + net_amount / game.active_bet_count;
         game.active_bet_count += 1;
         game.pool_balance += net_amount;
         game.platform_fees_collected += platform_fee;
 
-        // Update timer based on mode
+        // Update timer
+        let now = Clock::get()?.unix_timestamp;
         match game.timer_mode {
             0 => game.timer_end = now + game.timer_duration,
             1 => game.timer_end = game.timer_end + game.time_increment,
@@ -260,28 +400,22 @@ pub mod crazy_game_vanilla {
         }
 
         // Update last bettor and bet count
-        game.last_bettor = ctx.accounts.player.key();
+        game.last_bettor = bet.player;
         let bet_index = game.bet_count;
         game.bet_count += 1;
 
-        // Record bet
-        let bet = &mut ctx.accounts.bet;
-        bet.game = game.key();
-        bet.player = ctx.accounts.player.key();
+        // Fill in bet fields
         bet.bet_index = bet_index;
-        bet.amount = amount;
         bet.net_amount = net_amount;
         bet.roi_target = net_amount + (net_amount * game.roi_bps / 10000);
-        bet.accumulated_base = 0;
         bet.cumulative_at_join = game.cumulative_per_bet;
-        bet.reserved = false;
-        bet.withdrawn = false;
-        bet.bump = ctx.bumps.bet;
+        bet.is_pending = false;
 
         emit!(BetPlaced {
             game: game.key(),
-            player: ctx.accounts.player.key(),
+            player: bet.player,
             bet_index,
+            bet_seed: bet.bet_seed,
             amount,
             net_amount,
             timer_end: game.timer_end,
@@ -290,10 +424,73 @@ pub mod crazy_game_vanilla {
         Ok(())
     }
 
+    // ============================================================
+    // CANCEL PENDING BET — Player reclaims tokens if crank is slow
+    // or game ended while bet was pending.
+    // ============================================================
+
+    pub fn cancel_pending_bet(ctx: Context<CancelPendingBet>) -> Result<()> {
+        let game = &ctx.accounts.game;
+        let bet = &ctx.accounts.bet;
+        let game_host = game.host;
+        let game_name = game.name.clone();
+        let seeds = &[
+            b"game".as_ref(),
+            game_host.as_ref(),
+            game_name.as_bytes(),
+            &[game.bump],
+        ];
+
+        // Return tokens from escrow to player
+        let escrow_balance = ctx.accounts.escrow.amount;
+        if escrow_balance > 0 {
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.escrow.to_account_info(),
+                        to: ctx.accounts.player_token_account.to_account_info(),
+                        authority: game.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                escrow_balance,
+            )?;
+        }
+
+        // Close escrow, rent to player
+        token::close_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                CloseAccount {
+                    account: ctx.accounts.escrow.to_account_info(),
+                    destination: ctx.accounts.player.to_account_info(),
+                    authority: game.to_account_info(),
+                },
+                &[seeds],
+            ),
+        )?;
+
+        emit!(BetCancelled {
+            game: game.key(),
+            player: bet.player,
+            bet_seed: bet.bet_seed,
+            amount: bet.amount,
+        });
+
+        // Bet PDA closed via Anchor's close = player attribute
+        Ok(())
+    }
+
+    // ============================================================
+    // RESERVE ROI / WITHDRAW / JACKPOT — unchanged logic
+    // ============================================================
+
     pub fn reserve_roi(ctx: Context<ReserveRoi>) -> Result<()> {
         let game = &mut ctx.accounts.game;
         let bet = &mut ctx.accounts.bet;
 
+        require!(!bet.is_pending, GameError::BetNotProcessed);
         require!(!bet.reserved, GameError::AlreadyReserved);
         require!(!bet.withdrawn, GameError::AlreadyWithdrawn);
 
@@ -408,6 +605,148 @@ pub mod crazy_game_vanilla {
 
         Ok(())
     }
+
+    // ============================================================
+    // BOUNTY (operator-controlled, mode logic lives off-chain)
+    // ============================================================
+
+    pub fn pay_bounty(ctx: Context<PayBounty>, amount: u64) -> Result<()> {
+        let game = &mut ctx.accounts.game;
+
+        require!(game.is_active, GameError::GameNotActive);
+        require!(amount > 0, GameError::InvalidBountyAmount);
+
+        let available = game.pool_balance - game.reserved_balance;
+        require!(available >= amount, GameError::InsufficientPoolForBounty);
+
+        let game_host = game.host;
+        let game_name = game.name.clone();
+        let seeds = &[
+            b"game".as_ref(),
+            game_host.as_ref(),
+            game_name.as_bytes(),
+            &[game.bump],
+        ];
+
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.game_vault.to_account_info(),
+                    to: ctx.accounts.recipient_token_account.to_account_info(),
+                    authority: game.to_account_info(),
+                },
+                &[seeds],
+            ),
+            amount,
+        )?;
+
+        game.pool_balance -= amount;
+
+        emit!(BountyPaid {
+            game: game.key(),
+            recipient: ctx.accounts.recipient_token_account.owner,
+            amount,
+        });
+
+        Ok(())
+    }
+
+    // ============================================================
+    // ADMIN — GAME PAUSE
+    // ============================================================
+
+    pub fn pause_game(ctx: Context<AdminGameAction>) -> Result<()> {
+        ctx.accounts.game.is_paused = true;
+        Ok(())
+    }
+
+    pub fn unpause_game(ctx: Context<AdminGameAction>) -> Result<()> {
+        ctx.accounts.game.is_paused = false;
+        Ok(())
+    }
+
+    // ============================================================
+    // CLEANUP — CLOSE ACCOUNTS, RECOVER RENT
+    // ============================================================
+
+    pub fn close_game(ctx: Context<CloseGame>) -> Result<()> {
+        let game = &ctx.accounts.game;
+        let game_host = game.host;
+        let game_name = game.name.clone();
+        let seeds = &[
+            b"game".as_ref(),
+            game_host.as_ref(),
+            game_name.as_bytes(),
+            &[game.bump],
+        ];
+
+        token::close_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                CloseAccount {
+                    account: ctx.accounts.game_vault.to_account_info(),
+                    destination: ctx.accounts.host.to_account_info(),
+                    authority: game.to_account_info(),
+                },
+                &[seeds],
+            ),
+        )?;
+
+        emit!(GameClosed { game: game.key() });
+        Ok(())
+    }
+
+    pub fn close_bet(ctx: Context<CloseBet>) -> Result<()> {
+        emit!(BetClosed {
+            game: ctx.accounts.game.key(),
+            bet_index: ctx.accounts.bet.bet_index,
+        });
+        Ok(())
+    }
+
+    pub fn admin_force_close_game(ctx: Context<AdminForceCloseGame>) -> Result<()> {
+        let game = &ctx.accounts.game;
+        let game_host = game.host;
+        let game_name = game.name.clone();
+        let seeds = &[
+            b"game".as_ref(),
+            game_host.as_ref(),
+            game_name.as_bytes(),
+            &[game.bump],
+        ];
+
+        let vault_balance = ctx.accounts.game_vault.amount;
+        if vault_balance > 0 {
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.game_vault.to_account_info(),
+                        to: ctx.accounts.platform_vault.to_account_info(),
+                        authority: game.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                vault_balance,
+            )?;
+        }
+
+        token::close_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                CloseAccount {
+                    account: ctx.accounts.game_vault.to_account_info(),
+                    destination: ctx.accounts.host.to_account_info(),
+                    authority: game.to_account_info(),
+                },
+                &[seeds],
+            ),
+        )?;
+
+        emit!(GameClosed { game: game.key() });
+        Ok(())
+    }
 }
 
 // ============================================================
@@ -417,11 +756,9 @@ pub mod crazy_game_vanilla {
 #[derive(Accounts)]
 pub struct InitializeConfig<'info> {
     #[account(
-        init,
-        payer = admin,
+        init, payer = admin,
         space = PlatformConfig::SIZE,
-        seeds = [b"config"],
-        bump
+        seeds = [b"config"], bump
     )]
     pub config: Account<'info, PlatformConfig>,
     #[account(mut)]
@@ -431,13 +768,17 @@ pub struct InitializeConfig<'info> {
 
 #[derive(Accounts)]
 pub struct UpdateConfig<'info> {
-    #[account(
-        mut,
-        seeds = [b"config"],
-        bump = config.bump,
-        has_one = admin
-    )]
+    #[account(mut, seeds = [b"config"], bump = config.bump, has_one = admin)]
     pub config: Account<'info, PlatformConfig>,
+    pub admin: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CloseConfig<'info> {
+    /// CHECK: manually verified admin and handled close
+    #[account(mut, seeds = [b"config"], bump)]
+    pub config: UncheckedAccount<'info>,
+    #[account(mut)]
     pub admin: Signer<'info>,
 }
 
@@ -445,20 +786,16 @@ pub struct UpdateConfig<'info> {
 #[instruction(name: String)]
 pub struct InitializeGame<'info> {
     #[account(
-        init,
-        payer = host,
+        init, payer = host,
         space = Game::SIZE,
-        seeds = [b"game", host.key().as_ref(), name.as_bytes()],
-        bump
+        seeds = [b"game", host.key().as_ref(), name.as_bytes()], bump
     )]
     pub game: Account<'info, Game>,
 
     #[account(
-        init,
-        payer = host,
+        init, payer = host,
         space = Bet::SIZE,
-        seeds = [b"bet", game.key().as_ref(), &0u64.to_le_bytes()],
-        bump
+        seeds = [b"bet", game.key().as_ref(), &0u64.to_le_bytes()], bump
     )]
     pub initial_bet: Account<'info, Bet>,
 
@@ -475,12 +812,9 @@ pub struct InitializeGame<'info> {
     pub host_token_account: Account<'info, TokenAccount>,
 
     #[account(
-        init_if_needed,
-        payer = host,
-        token::mint = token_mint,
-        token::authority = game,
-        seeds = [b"vault", game.key().as_ref()],
-        bump
+        init_if_needed, payer = host,
+        token::mint = token_mint, token::authority = game,
+        seeds = [b"vault", game.key().as_ref()], bump
     )]
     pub game_vault: Account<'info, TokenAccount>,
 
@@ -495,20 +829,127 @@ pub struct InitializeGame<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
+// ── PlaceBet: game is READ-ONLY, player writes only to own accounts ──
 #[derive(Accounts)]
+#[instruction(amount: u64, bet_seed: u64)]
 pub struct PlaceBet<'info> {
-    #[account(mut, seeds = [b"game", game.host.as_ref(), game.name.as_bytes()], bump = game.bump)]
+    /// Game is READ-ONLY — no write conflicts between simultaneous bets
+    #[account(seeds = [b"game", game.host.as_ref(), game.name.as_bytes()], bump = game.bump)]
     pub game: Account<'info, Game>,
 
     #[account(
-        init,
-        payer = player,
+        init, payer = player,
         space = Bet::SIZE,
-        seeds = [b"bet", game.key().as_ref(), &game.bet_count.to_le_bytes()],
-        bump
+        seeds = [b"bet", game.key().as_ref(), &bet_seed.to_le_bytes()], bump
     )]
     pub bet: Account<'info, Bet>,
-    
+
+    /// Per-bet escrow: unique token account, no shared writes
+    #[account(
+        init, payer = player,
+        token::mint = token_mint,
+        token::authority = game,
+        seeds = [b"escrow", game.key().as_ref(), &bet_seed.to_le_bytes()], bump
+    )]
+    pub escrow: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub player: Signer<'info>,
+
+    #[account(constraint = token_mint.key() == game.token_mint)]
+    pub token_mint: Account<'info, token::Mint>,
+
+    #[account(
+        mut,
+        constraint = player_token_account.owner == player.key(),
+        constraint = player_token_account.mint == game.token_mint
+    )]
+    pub player_token_account: Account<'info, TokenAccount>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, PlatformConfig>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+// ── ProcessBet: operator-only, sequential game state updates ──
+#[derive(Accounts)]
+pub struct ProcessBet<'info> {
+    #[account(mut, seeds = [b"game", game.host.as_ref(), game.name.as_bytes()], bump = game.bump)]
+    pub game: Box<Account<'info, Game>>,
+
+    #[account(
+        mut,
+        seeds = [b"bet", game.key().as_ref(), &bet.bet_seed.to_le_bytes()],
+        bump = bet.bump,
+        constraint = bet.game == game.key() @ GameError::Unauthorized,
+        constraint = bet.is_pending @ GameError::BetNotPending,
+    )]
+    pub bet: Box<Account<'info, Bet>>,
+
+    #[account(
+        mut,
+        seeds = [b"escrow", game.key().as_ref(), &bet.bet_seed.to_le_bytes()],
+        bump,
+        constraint = escrow.mint == game.token_mint,
+    )]
+    pub escrow: Box<Account<'info, TokenAccount>>,
+
+    #[account(
+        mut,
+        seeds = [b"vault", game.key().as_ref()], bump
+    )]
+    pub game_vault: Box<Account<'info, TokenAccount>>,
+
+    #[account(mut)]
+    pub platform_vault: Box<Account<'info, TokenAccount>>,
+
+    #[account(
+        mut,
+        constraint = host_vault.key() == game.host_vault @ GameError::InvalidHostVault
+    )]
+    /// CHECK: validated against stored host_vault, may be closed
+    pub host_vault: UncheckedAccount<'info>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Box<Account<'info, PlatformConfig>>,
+
+    #[account(constraint = operator.key() == config.operator @ GameError::Unauthorized)]
+    pub operator: Signer<'info>,
+
+    /// CHECK: receives escrow rent refund, must be the original bettor
+    #[account(mut, constraint = bettor.key() == bet.player @ GameError::Unauthorized)]
+    pub bettor: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+// ── CancelPendingBet: player reclaims tokens from pending bet ──
+#[derive(Accounts)]
+pub struct CancelPendingBet<'info> {
+    #[account(seeds = [b"game", game.host.as_ref(), game.name.as_bytes()], bump = game.bump)]
+    pub game: Account<'info, Game>,
+
+    #[account(
+        mut,
+        close = player,
+        seeds = [b"bet", game.key().as_ref(), &bet.bet_seed.to_le_bytes()],
+        bump = bet.bump,
+        constraint = bet.game == game.key() @ GameError::Unauthorized,
+        constraint = bet.is_pending @ GameError::BetNotPending,
+        constraint = bet.player == player.key() @ GameError::Unauthorized,
+    )]
+    pub bet: Account<'info, Bet>,
+
+    #[account(
+        mut,
+        seeds = [b"escrow", game.key().as_ref(), &bet.bet_seed.to_le_bytes()],
+        bump,
+    )]
+    pub escrow: Account<'info, TokenAccount>,
+
     #[account(mut)]
     pub player: Signer<'info>,
 
@@ -519,24 +960,7 @@ pub struct PlaceBet<'info> {
     )]
     pub player_token_account: Account<'info, TokenAccount>,
 
-    #[account(
-        mut,
-        seeds = [b"vault", game.key().as_ref()],
-        bump
-    )]
-    pub game_vault: Account<'info, TokenAccount>,
-
-    #[account(mut)]
-    pub platform_vault: Account<'info, TokenAccount>,
-     #[account(
-        mut,
-        constraint = host_vault.owner == game.host,
-        constraint = host_vault.mint == game.token_mint
-    )]
-    pub host_vault: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
-    pub system_program: Program<'info, System>,
-    pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
@@ -546,7 +970,7 @@ pub struct ReserveRoi<'info> {
 
     #[account(
         mut,
-        seeds = [b"bet", game.key().as_ref(), &bet.bet_index.to_le_bytes()],
+        seeds = [b"bet", game.key().as_ref(), &bet.bet_seed.to_le_bytes()],
         bump = bet.bump
     )]
     pub bet: Account<'info, Bet>,
@@ -561,7 +985,7 @@ pub struct Withdraw<'info> {
 
     #[account(
         mut,
-        seeds = [b"bet", game.key().as_ref(), &bet.bet_index.to_le_bytes()],
+        seeds = [b"bet", game.key().as_ref(), &bet.bet_seed.to_le_bytes()],
         bump = bet.bump
     )]
     pub bet: Account<'info, Bet>,
@@ -576,11 +1000,7 @@ pub struct Withdraw<'info> {
     )]
     pub player_token_account: Account<'info, TokenAccount>,
 
-    #[account(
-        mut,
-        seeds = [b"vault", game.key().as_ref()],
-        bump
-    )]
+    #[account(mut, seeds = [b"vault", game.key().as_ref()], bump)]
     pub game_vault: Account<'info, TokenAccount>,
 
     pub token_program: Program<'info, Token>,
@@ -601,12 +1021,113 @@ pub struct ClaimJackpot<'info> {
     )]
     pub claimant_token_account: Account<'info, TokenAccount>,
 
+    #[account(mut, seeds = [b"vault", game.key().as_ref()], bump)]
+    pub game_vault: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct PayBounty<'info> {
+    #[account(mut, seeds = [b"game", game.host.as_ref(), game.name.as_bytes()], bump = game.bump)]
+    pub game: Account<'info, Game>,
+
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, PlatformConfig>,
+
+    #[account(constraint = operator.key() == config.operator @ GameError::Unauthorized)]
+    pub operator: Signer<'info>,
+
+    #[account(mut, constraint = recipient_token_account.mint == game.token_mint)]
+    pub recipient_token_account: Account<'info, TokenAccount>,
+
+    #[account(mut, seeds = [b"vault", game.key().as_ref()], bump)]
+    pub game_vault: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct AdminGameAction<'info> {
     #[account(
         mut,
-        seeds = [b"vault", game.key().as_ref()],
-        bump
+        seeds = [b"game", game.host.as_ref(), game.name.as_bytes()],
+        bump = game.bump
     )]
+    pub game: Account<'info, Game>,
+
+    #[account(seeds = [b"config"], bump = config.bump, has_one = admin)]
+    pub config: Account<'info, PlatformConfig>,
+
+    pub admin: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CloseGame<'info> {
+    #[account(
+        mut, close = host,
+        seeds = [b"game", game.host.as_ref(), game.name.as_bytes()],
+        bump = game.bump,
+        constraint = game.jackpot_claimed @ GameError::JackpotNotClaimed,
+        constraint = game.pool_balance == 0 @ GameError::PoolNotEmpty,
+    )]
+    pub game: Account<'info, Game>,
+
+    #[account(mut, seeds = [b"vault", game.key().as_ref()], bump)]
     pub game_vault: Account<'info, TokenAccount>,
+
+    /// CHECK: must be game host
+    #[account(mut, constraint = host.key() == game.host @ GameError::Unauthorized)]
+    pub host: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct CloseBet<'info> {
+    #[account(seeds = [b"game", game.host.as_ref(), game.name.as_bytes()], bump = game.bump)]
+    pub game: Account<'info, Game>,
+
+    #[account(
+        mut, close = recipient,
+        seeds = [b"bet", game.key().as_ref(), &bet.bet_seed.to_le_bytes()],
+        bump = bet.bump,
+        constraint = bet.game == game.key() @ GameError::Unauthorized,
+        constraint = bet.withdrawn || (!game.is_active && !bet.reserved && !bet.is_pending) @ GameError::BetNotCloseable,
+    )]
+    pub bet: Account<'info, Bet>,
+
+    /// CHECK: rent goes to original bettor
+    #[account(mut, constraint = recipient.key() == bet.player @ GameError::Unauthorized)]
+    pub recipient: AccountInfo<'info>,
+
+    pub caller: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct AdminForceCloseGame<'info> {
+    #[account(
+        mut, close = host,
+        seeds = [b"game", game.host.as_ref(), game.name.as_bytes()],
+        bump = game.bump,
+        constraint = game.jackpot_claimed @ GameError::JackpotNotClaimed,
+    )]
+    pub game: Account<'info, Game>,
+
+    #[account(mut, seeds = [b"vault", game.key().as_ref()], bump)]
+    pub game_vault: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub platform_vault: Account<'info, TokenAccount>,
+
+    #[account(seeds = [b"config"], bump = config.bump, has_one = admin)]
+    pub config: Account<'info, PlatformConfig>,
+
+    pub admin: Signer<'info>,
+
+    /// CHECK: must be game host
+    #[account(mut, constraint = host.key() == game.host @ GameError::Unauthorized)]
+    pub host: AccountInfo<'info>,
 
     pub token_program: Program<'info, Token>,
 }
@@ -624,13 +1145,15 @@ pub struct TokenFee {
 #[account]
 pub struct PlatformConfig {
     pub admin: Pubkey,              // 32
-    pub default_fee_bps: u16,      // 2
-    pub token_fees: Vec<TokenFee>, // 4 + (34 * MAX_TOKEN_FEES)
+    pub operator: Pubkey,           // 32
+    pub default_fee_bps: u16,       // 2
+    pub token_fees: Vec<TokenFee>,  // 4 + (34 * MAX_TOKEN_FEES)
+    pub is_paused: bool,            // 1
     pub bump: u8,                   // 1
 }
 
 impl PlatformConfig {
-    pub const SIZE: usize = 8 + 32 + 2 + (4 + 34 * MAX_TOKEN_FEES) + 1 + 64;
+    pub const SIZE: usize = 8 + 32 + 32 + 2 + (4 + 34 * MAX_TOKEN_FEES) + 1 + 1 + 64;
 }
 
 #[account]
@@ -655,14 +1178,17 @@ pub struct Game {
     pub last_bettor: Pubkey,            // 32
     pub bet_count: u64,                 // 8
     pub is_active: bool,                // 1
+    pub is_paused: bool,                // 1
     pub jackpot_claimed: bool,          // 1
     pub platform_fees_collected: u64,   // 8
     pub active_bet_count: u64,          // 8
+    pub host_vault: Pubkey,             // 32
     pub bump: u8,                       // 1
 }
 
 impl Game {
-    pub const SIZE: usize = 8 + 32 + (4 + 30) + 32 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 8 + 8 + 8 + 8 + 8 + 8 + 32 + 8 + 1 + 1 + 8 + 8 + 1 + 64;
+    pub const SIZE: usize = 8 + 32 + (4 + 30) + 32 + 8 + 8 + 8 + 8 + 8 + 8 + 8
+        + 1 + 8 + 8 + 8 + 8 + 8 + 8 + 32 + 8 + 1 + 1 + 1 + 8 + 8 + 32 + 1 + 64;
 }
 
 #[account]
@@ -670,18 +1196,20 @@ pub struct Bet {
     pub game: Pubkey,           // 32
     pub player: Pubkey,         // 32
     pub bet_index: u64,         // 8
+    pub bet_seed: u64,          // 8
     pub amount: u64,            // 8
     pub net_amount: u64,        // 8
     pub roi_target: u64,        // 8
     pub accumulated_base: u64,  // 8
     pub cumulative_at_join: u64,// 8
+    pub is_pending: bool,       // 1
     pub reserved: bool,         // 1
     pub withdrawn: bool,        // 1
     pub bump: u8,               // 1
 }
 
 impl Bet {
-    pub const SIZE: usize = 8 + 32 + 32 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 1 + 1 + 64;
+    pub const SIZE: usize = 8 + 32 + 32 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 1 + 1 + 1 + 64;
 }
 
 // ============================================================
@@ -704,14 +1232,34 @@ pub struct GameCreated {
     pub time_increment: i64,
 }
 
+/// Emitted by place_bet — bet is queued, tokens in escrow
+#[event]
+pub struct BetQueued {
+    pub game: Pubkey,
+    pub player: Pubkey,
+    pub bet_seed: u64,
+    pub amount: u64,
+}
+
+/// Emitted by process_bet — bet is active in the game
 #[event]
 pub struct BetPlaced {
     pub game: Pubkey,
     pub player: Pubkey,
     pub bet_index: u64,
+    pub bet_seed: u64,
     pub amount: u64,
     pub net_amount: u64,
     pub timer_end: i64,
+}
+
+/// Emitted by cancel_pending_bet — tokens returned to player
+#[event]
+pub struct BetCancelled {
+    pub game: Pubkey,
+    pub player: Pubkey,
+    pub bet_seed: u64,
+    pub amount: u64,
 }
 
 #[event]
@@ -737,6 +1285,24 @@ pub struct JackpotClaimed {
     pub amount: u64,
 }
 
+#[event]
+pub struct BountyPaid {
+    pub game: Pubkey,
+    pub recipient: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
+pub struct GameClosed {
+    pub game: Pubkey,
+}
+
+#[event]
+pub struct BetClosed {
+    pub game: Pubkey,
+    pub bet_index: u64,
+}
+
 // ============================================================
 // ERRORS
 // ============================================================
@@ -749,7 +1315,7 @@ pub enum GameError {
     InvalidDeposit,
     #[msg("Invalid minimum bet")]
     InvalidMinBet,
-    #[msg("Invalid ROI — must be between 10% and 1000%")]
+    #[msg("Invalid ROI — must be between 10% and 100%")]
     InvalidRoi,
     #[msg("Invalid timer duration")]
     InvalidTimer,
@@ -787,4 +1353,24 @@ pub enum GameError {
     InvalidFee,
     #[msg("Too many token fee overrides")]
     TooManyTokenFees,
+    #[msg("Invalid host vault")]
+    InvalidHostVault,
+    #[msg("Platform is paused")]
+    PlatformPaused,
+    #[msg("Game is paused")]
+    GamePaused,
+    #[msg("Jackpot must be claimed before closing game")]
+    JackpotNotClaimed,
+    #[msg("Pool must be empty before closing game")]
+    PoolNotEmpty,
+    #[msg("Bet cannot be closed yet")]
+    BetNotCloseable,
+    #[msg("Invalid bounty amount")]
+    InvalidBountyAmount,
+    #[msg("Insufficient pool for bounty")]
+    InsufficientPoolForBounty,
+    #[msg("Bet is still pending — not yet processed")]
+    BetNotProcessed,
+    #[msg("Bet is not pending")]
+    BetNotPending,
 }

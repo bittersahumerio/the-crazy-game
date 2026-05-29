@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import dynamic from 'next/dynamic';
+import ShareWinButton from '@/components/ShareWinButton';
 import bs58 from 'bs58';
 import Navbar from '@/components/Navbar';
 import Link from 'next/link';
@@ -15,15 +16,20 @@ const WalletMultiButton = dynamic(
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-function StatBox({ label, value }) {
+function StatBox({ label, value, sublabel }) {
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', padding: '24px', textAlign: 'center' }}>
-      <div style={{ fontFamily: 'var(--font-display)', fontSize: '40px', color: 'var(--accent)', marginBottom: '4px' }}>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: '36px', color: 'var(--accent)', marginBottom: '4px' }}>
         {value}
       </div>
       <div style={{ fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
         {label}
       </div>
+      {sublabel && (
+        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', opacity: 0.6 }}>
+          {sublabel}
+        </div>
+      )}
     </div>
   );
 }
@@ -31,11 +37,17 @@ function StatBox({ label, value }) {
 export default function ProfilePage() {
   const { publicKey, connected, signMessage } = useWallet();
   const [bets, setBets] = useState([]);
+  const [betsTotal, setBetsTotal] = useState(0);
+  const [betsOffset, setBetsOffset] = useState(0);
+  const [betsLoading, setBetsLoading] = useState(false);
   const [activeBets, setActiveBets] = useState([]);
   const [stats, setStats] = useState(null);
   const [gamesHosted, setGamesHosted] = useState([]);
+  const [wins, setWins] = useState([]);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState('active');
+  const [referralData, setReferralData] = useState(null);
+  const [refCopied, setRefCopied] = useState(false);
   const { connection } = useConnection();
   const [username, setUsername] = useState(null);
   const [usernameInput, setUsernameInput] = useState('');
@@ -44,24 +56,51 @@ export default function ProfilePage() {
   const [socials, setSocials] = useState({ twitter: '', telegram: '', discord: '' });
   const [socialsStatus, setSocialsStatus] = useState(null);
   const [socialsLoading, setSocialsLoading] = useState(false);
+  const [seeds, setSeeds] = useState(0);
+  const [scovilles, setScovilles] = useState(0);
+  const [heatRank, setHeatRank] = useState(null);
 
   useEffect(() => {
     if (connected && publicKey) {
       fetchProfile();
       fetchActiveBets();
+      fetchPoints();
     }
   }, [connected, publicKey]);
+
+  async function fetchPoints() {
+    try {
+      const [seedsRes, scovillesRes, referralRes, winsRes] = await Promise.all([
+        fetch(`${API_URL}/api/users/${publicKey.toString()}/seeds`),
+        fetch(`${API_URL}/api/users/${publicKey.toString()}/scovilles`),
+        fetch(`${API_URL}/api/users/${publicKey.toString()}/referrals`),
+        fetch(`${API_URL}/api/wins/by-wallet/${publicKey.toString()}?limit=10`),
+      ]);
+      const seedsData = await seedsRes.json();
+      const referralJson = await referralRes.json();
+      setReferralData(referralJson);
+      const scovillesData = await scovillesRes.json();
+      setSeeds(seedsData.seeds || 0);
+      setScovilles(scovillesData.scovilles || 0);
+      setHeatRank(scovillesData.rank || null);
+    } catch (e) {
+      console.error(e);
+    }
+  }
 
   async function fetchProfile() {
     setLoading(true);
     try {
       const [playerRes, userRes] = await Promise.all([
-        fetch(`${API_URL}/api/players/${publicKey.toString()}`),
+        fetch(`${API_URL}/api/players/${publicKey.toString()}?limit=50&offset=0`),
         fetch(`${API_URL}/api/users/${publicKey.toString()}`),
       ]);
       const playerData = await playerRes.json();
       const userData = await userRes.json();
-      setBets(playerData.bets || []);
+      const fetchedBets = playerData.bets || [];
+      console.log('BETS DEBUG: count=', fetchedBets.length, 'total_count=', fetchedBets[0]?.total_count);
+      setBets(fetchedBets);
+      setBetsTotal(parseInt(fetchedBets[0]?.total_count || 0));
       setStats(playerData.stats);
       setGamesHosted(playerData.games_hosted || []);
       if (userData.user) {
@@ -79,6 +118,20 @@ export default function ProfilePage() {
     }
   }
 
+  async function loadMoreBets() {
+    setBetsLoading(true);
+    try {
+      const newOffset = betsOffset + 50;
+      const res = await fetch(`${API_URL}/api/players/${publicKey.toString()}?limit=50&offset=${newOffset}`);
+      const data = await res.json();
+      setBets(prev => [...prev, ...(data.bets || [])]);
+      setBetsOffset(newOffset);
+    } catch (e) {
+      console.error(e);
+    }
+    setBetsLoading(false);
+  }
+
   async function fetchActiveBets() {
     try {
       const res = await fetch(`${API_URL}/api/players/${publicKey.toString()}/active`);
@@ -89,14 +142,35 @@ export default function ProfilePage() {
     }
   }
 
+  // Fetch a single-use nonce and sign the canonical message for the given purpose.
+  // Canonical format matches signedMessage.js on the backend.
+  async function signWithNonce(purpose, payload) {
+    const wallet = publicKey.toString();
+    const nonceRes = await fetch(`${API_URL}/api/auth/nonce`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet, purpose }),
+    });
+    if (!nonceRes.ok) throw new Error('Failed to get signing nonce');
+    const { nonce, exp } = await nonceRes.json();
+
+    const DOMAIN = 'thecrazygame.fun';
+    const payloadLines = Object.entries(payload).map(([k, v]) => `${k}: ${v}`).join('\n');
+    const parts = [purpose, `Wallet: ${wallet}`];
+    if (payloadLines) parts.push(payloadLines);
+    parts.push(`Nonce: ${nonce}`, `Exp: ${exp}`, `Domain: ${DOMAIN}`);
+    const message = parts.join('\n');
+
+    const msgBytes = new TextEncoder().encode(message);
+    const sigBytes = await signMessage(msgBytes);
+    return { message, signature: bs58.encode(sigBytes) };
+  }
+
   async function registerUsername() {
     setUsernameLoading(true);
     setUsernameStatus(null);
     try {
-      const message = `Register username: ${usernameInput}`;
-      const messageBytes = new TextEncoder().encode(message);
-      const signatureBytes = await signMessage(messageBytes);
-      const signature = bs58.encode(signatureBytes);
+      const { message, signature } = await signWithNonce('set_username', { Username: usernameInput });
       const res = await fetch(`${API_URL}/api/users/username`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -120,10 +194,11 @@ export default function ProfilePage() {
     setSocialsLoading(true);
     setSocialsStatus(null);
     try {
-      const message = `Update socials: ${publicKey.toString()}`;
-      const messageBytes = new TextEncoder().encode(message);
-      const signatureBytes = await signMessage(messageBytes);
-      const signature = bs58.encode(signatureBytes);
+      const { message, signature } = await signWithNonce('set_socials', {
+        Twitter: socials.twitter || '',
+        Telegram: socials.telegram || '',
+        Discord: socials.discord || '',
+      });
       const res = await fetch(`${API_URL}/api/users/socials`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -163,6 +238,14 @@ export default function ProfilePage() {
     });
   }
 
+  function formatPoints(n) {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    if (n < 1) return n.toFixed(2);
+    if (n % 1 !== 0) return n.toFixed(1);
+    return Math.floor(n).toString();
+  }
+
   function getRoiProgress(bet) {
     const earned = parseFloat(bet.current_accumulated || bet.accumulated_base);
     const target = parseFloat(bet.roi_target);
@@ -176,7 +259,7 @@ export default function ProfilePage() {
       <>
         <Navbar />
         <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '80px 24px', textAlign: 'center' }}>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '64px', marginBottom: '24px' }}>
+          <div className="h-display-lg" style={{ fontFamily: 'var(--font-display)', marginBottom: '24px' }}>
             CONNECT WALLET
           </div>
           <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>
@@ -196,7 +279,7 @@ export default function ProfilePage() {
         {/* Header */}
         <div style={{ marginBottom: '32px' }}>
           {username ? (
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: '72px', color: 'var(--accent)', marginBottom: '4px' }}>
+            <div className="h-display-xl" style={{ fontFamily: 'var(--font-display)', color: 'var(--accent)', marginBottom: '4px' }}>
               {username}
             </div>
           ) : (
@@ -214,13 +297,23 @@ export default function ProfilePage() {
         </div>
 
         {/* Stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '32px', maxWidth: '400px' }}>
+        <div className="grid-stats-4" style={{ gap: '16px', marginBottom: '32px' }}>
           <StatBox label="TOTAL BETS" value={stats?.total_bets || 0} />
           <StatBox label="GAMES HOSTED" value={gamesHosted.length} />
+          <StatBox
+            label="WEEKLY HEAT 🌶️"
+            value={formatPoints(scovilles)}
+            sublabel={heatRank ? `RANK #${heatRank}` : 'SCOVILLES'}
+          />
+          <StatBox
+            label="SEEDS 🌱"
+            value={formatPoints(seeds)}
+            sublabel="LIFETIME · FUTURE AIRDROP"
+          />
         </div>
 
         {/* Username + Socials */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '32px' }}>
+        <div className="grid-2-stack" style={{ gap: '24px', marginBottom: '32px' }}>
           {/* Username box */}
           <div style={{ border: '1px solid var(--border)', background: 'var(--bg-card)', padding: '24px' }}>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '0.1em', marginBottom: '16px' }}>USERNAME</div>
@@ -284,8 +377,10 @@ export default function ProfilePage() {
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: '24px' }}>
           {[
             { key: 'active', label: `ACTIVE BETS (${activeBets.length})` },
-            { key: 'history', label: `BET HISTORY (${bets.length})` },
+            { key: 'history', label: `BET HISTORY (${betsTotal || bets.length})` },
             { key: 'hosted', label: `GAMES HOSTED (${gamesHosted.length})` },
+            { key: 'wins', label: `WINS (${wins.length})` },
+            { key: 'referrals', label: `REFERRALS (${referralData?.referrals?.length || 0})` },
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)} style={{
               background: 'transparent', border: 'none', padding: '12px 24px',
@@ -344,7 +439,6 @@ export default function ProfilePage() {
                           <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>PROGRESS</div>
                         </div>
                       </div>
-                      {/* Progress bar */}
                       {!bet.reserved && (
                         <div style={{ marginTop: '10px', height: '2px', background: 'var(--border)' }}>
                           <div style={{ height: '100%', width: `${progress}%`, background: progress >= 90 ? '#f0c040' : 'var(--accent)', transition: 'width 0.3s' }} />
@@ -390,6 +484,11 @@ export default function ProfilePage() {
             )}
           </div>
         )}
+            {betsTotal > bets.length && (
+              <div style={{ textAlign: 'center', marginTop: '16px' }}>
+                <button onClick={loadMoreBets} disabled={betsLoading} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-secondary)', padding: '10px 32px', cursor: betsLoading ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)', fontSize: '12px', letterSpacing: '0.08em' }}>{betsLoading ? 'LOADING...' : `LOAD MORE (${bets.length}/${betsTotal})`}</button>
+              </div>
+            )}
 
         {/* Games Hosted */}
         {tab === 'hosted' && (
@@ -428,6 +527,148 @@ export default function ProfilePage() {
           </div>
         )}
 
+
+        {tab === 'wins' && (
+          <div>
+            {wins.length === 0 ? (
+              <div style={{ padding: '60px 24px', textAlign: 'center', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', marginBottom: '12px' }}>NO JACKPOT WINS YET</div>
+                <p style={{ fontSize: '13px' }}>Win a game's jackpot to start your trophy case here.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {wins.map((w, i) => {
+                  const usd = (Number(w.jackpot_amount) / 1_000_000).toFixed(2);
+                  const lastBetUsd = (Number(w.last_bet_amount) / 1_000_000).toFixed(2);
+                  const pnl = Number(w.pnl_percent).toLocaleString('en-US', { maximumFractionDigits: 1 });
+                  return (
+                    <div key={w.game_number} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px',
+                      border: '1px solid var(--border)', background: 'var(--bg-card)', padding: '16px 20px', flexWrap: 'wrap',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+                        <div style={{ fontFamily: 'var(--font-display)', fontSize: '20px', color: 'var(--text-muted)', minWidth: '32px' }}>
+                          #{i + 1}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '13px', color: 'var(--text-primary)', marginBottom: '2px' }}>
+                            {w.game_name} <span style={{ color: 'var(--text-muted)' }}>#{String(w.game_number).padStart(4, '0')}</span>
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                            ${lastBetUsd} bet → ${usd} jackpot
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: 'var(--accent)', lineHeight: 1 }}>
+                            ${usd}
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                            {pnl}% PnL
+                          </div>
+                        </div>
+                        <ShareWinButton
+                          gameNumber={w.game_number}
+                          gameName={w.game_name}
+                          refCode={publicKey?.toString().slice(0, 8)}
+                          size="sm"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'referrals' && (
+          <div>
+            {/* Referral link */}
+            <div style={{ border: '1px solid var(--border)', padding: '24px', marginBottom: '24px' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '0.08em', marginBottom: '8px' }}>YOUR REFERRAL LINK</div>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <div style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', padding: '10px 14px', fontSize: '13px', fontFamily: 'monospace', color: 'var(--text-secondary)', borderRadius: '4px' }}>
+                  {referralData?.referral_code ? `${typeof window !== 'undefined' ? window.location.origin : ''}?ref=${referralData.referral_code}` : 'Loading...'}
+                </div>
+                <button onClick={() => { if (referralData?.referral_code) { navigator.clipboard.writeText(`${window.location.origin}?ref=${referralData.referral_code}`); setRefCopied(true); setTimeout(() => setRefCopied(false), 2000); } }} style={{ background: refCopied ? '#22c55e' : 'var(--accent)', color: '#000', border: 'none', padding: '10px 16px', cursor: 'pointer', fontFamily: 'var(--font-body)', fontSize: '12px', letterSpacing: '0.08em', borderRadius: '4px', transition: 'background 0.2s' }}>
+                  {refCopied ? '✓ COPIED' : 'COPY'}
+                </button>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
+                Earn 20% of every fee paid by players you refer — in USDC and Seeds.
+              </div>
+            </div>
+            {/* Earnings */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+              {[
+                ['PENDING USDC', `$${((parseInt(referralData?.balance?.pending_usdc) || 0) / 1_000_000).toFixed(2)}`],
+                ['TOTAL EARNED USDC', `$${((parseInt(referralData?.balance?.total_earned_usdc) || 0) / 1_000_000).toFixed(2)}`],
+                ['PENDING SEEDS', parseFloat(referralData?.balance?.pending_seeds || 0).toFixed(1)],
+                ['TOTAL SEEDS EARNED', parseFloat(referralData?.balance?.total_earned_seeds || 0).toFixed(1)],
+              ].map(([label, value]) => (
+                <div key={label} style={{ border: '1px solid var(--border)', padding: '16px', textAlign: 'center' }}>
+                  <div style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: 'var(--accent)', marginBottom: '4px' }}>{value}</div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>{label}</div>
+                </div>
+              ))}
+            </div>
+            {/* Claim button */}
+            {parseInt(referralData?.balance?.pending_usdc) >= 1000000 && (
+              <div style={{ marginBottom: '24px', textAlign: 'center' }}>
+                <button onClick={async () => {
+                  try {
+                    const pending = parseInt(referralData?.balance?.pending_usdc) || 0;
+                    const { message, signature } = await signWithNonce('referral_claim', { Amount: pending });
+                    const res = await fetch(`${API_URL}/api/users/referral/claim`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ wallet: publicKey.toString(), signature, message }),
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                      toast.success(`Claimed $${(data.amount / 1_000_000).toFixed(2)} USDC!`);
+                      // Refresh referral data
+                      const r = await fetch(`${API_URL}/api/users/${publicKey.toString()}/referrals`);
+                      setReferralData(await r.json());
+                    } else {
+                      toast.error(data.error || 'Claim failed');
+                    }
+                  } catch (e) {
+                    toast.error('Claim failed');
+                  }
+                }} style={{ background: 'var(--accent)', color: '#000', border: 'none', padding: '12px 32px', cursor: 'pointer', fontFamily: 'var(--font-display)', fontSize: '18px', letterSpacing: '0.05em' }}>
+                  CLAIM ${((parseInt(referralData?.balance?.pending_usdc) || 0) / 1_000_000).toFixed(2)} USDC
+                </button>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>Minimum claim: $1.00</div>
+              </div>
+            )}
+            {/* Referrals list */}
+            {!referralData?.referrals?.length ? (
+              <div style={{ border: '1px solid var(--border)', padding: '60px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', marginBottom: '16px' }}>NO REFERRALS YET</div>
+                <div style={{ fontSize: '13px' }}>Share your referral link to start earning.</div>
+              </div>
+            ) : (
+              <div style={{ border: '1px solid var(--border)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: '16px', padding: '12px 20px', borderBottom: '1px solid var(--border)', fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>
+                  <span>PLAYER</span><span style={{ textAlign: 'right' }}>JOINED</span>
+                </div>
+                {referralData.referrals.map((r, i) => (
+                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: '16px', padding: '12px 20px', borderBottom: '1px solid var(--border)', fontSize: '13px', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace', fontSize: '12px' }}>
+                      {r.username ? `@${r.username}` : `${r.referee_wallet.slice(0, 8)}...`}
+                    </span>
+                    <span style={{ textAlign: 'right', fontSize: '11px', color: 'var(--text-muted)' }}>
+                      {new Date(r.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </>
   );
