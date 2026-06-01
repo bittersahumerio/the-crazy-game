@@ -108,7 +108,7 @@ export async function GET(request, { params }) {
             {timer.live && <div style={{ fontSize: 28, color: DIM, display: 'flex' }}>left</div>}
           </div>
           <div style={{ fontSize: 22, color: '#b8860b', marginTop: 8, display: 'flex' }}>
-            ⚠ Snapshot — not live. Open the game or refresh for the current time.
+            ⏱ Time left when you checked — open the game to watch it tick live.
           </div>
         </div>
 
