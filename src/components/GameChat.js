@@ -18,6 +18,7 @@ export default function GameChat({ gameId }) {
   const [token, setToken] = useState(null);
   const [busy, setBusy] = useState(false);
   const [blocked, setBlocked] = useState(false); // set if backend says "not a participant"
+  const [isMod, setIsMod] = useState(false);
   const listRef = useRef(null);
   const lastTsRef = useRef(0);
 
@@ -26,8 +27,12 @@ export default function GameChat({ gameId }) {
 
   useEffect(() => {
     setBlocked(false);
-    if (!tokenKey) { setToken(null); return; }
-    try { const t = localStorage.getItem(tokenKey); setToken(t || null); } catch { setToken(null); }
+    if (!tokenKey) { setToken(null); setIsMod(false); return; }
+    try {
+      const raw = localStorage.getItem(tokenKey);
+      if (raw) { const s = JSON.parse(raw); setToken(s.t || null); setIsMod(!!s.m); }
+      else { setToken(null); setIsMod(false); }
+    } catch { setToken(null); setIsMod(false); }
   }, [tokenKey]);
 
   const fetchMessages = useCallback(async () => {
@@ -76,8 +81,21 @@ export default function GameChat({ gameId }) {
     if (sr.status === 403) { setBlocked(true); throw new Error(sd.error || 'Only players who bet in this game can chat'); }
     if (!sr.ok) throw new Error(sd.error || 'Could not join chat');
     setToken(sd.token);
-    try { localStorage.setItem(tokenKey, sd.token); } catch { /* */ }
+    setIsMod(!!sd.isModerator);
+    try { localStorage.setItem(tokenKey, JSON.stringify({ t: sd.token, m: !!sd.isModerator })); } catch { /* */ }
     return sd.token;
+  }
+
+  async function deleteMessage(id) {
+    if (!token) return;
+    try {
+      const r = await fetch(`${API_URL}/api/games/${gameId}/chat/${id}`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Delete failed'); }
+      setMessages((prev) => prev.filter((m) => m.id !== id));
+    } catch (e) { toast.error(e.message || 'Could not delete'); }
   }
 
   async function send() {
@@ -118,6 +136,10 @@ export default function GameChat({ gameId }) {
               {m.username ? `@${m.username}` : shortAddr(m.wallet)}
             </span>
             <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 8 }}>{fmtTime(m.created_at)}</span>
+            {isMod && (
+              <button onClick={() => deleteMessage(m.id)} title="Delete message (mod)"
+                style={{ marginLeft: 8, background: 'none', border: 'none', color: 'var(--accent-red)', cursor: 'pointer', fontSize: 12, padding: 0, lineHeight: 1 }}>✕</button>
+            )}
             <div style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>{m.body}</div>
           </div>
         ))}

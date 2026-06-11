@@ -852,13 +852,9 @@ async function handleWithdraw(bet) {
               )}
               </>
             )}
+            {game?.id && <GameChat gameId={game.id} />}
           </div>
         </div>
-        {game?.id && (
-          <div style={{ marginTop: '24px' }}>
-            <GameChat gameId={game.id} />
-          </div>
-        )}
       </main>
     </>
   );
