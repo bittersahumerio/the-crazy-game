@@ -7,6 +7,7 @@ import Tooltip from '@/components/Tooltip';
 import TypeBadge, { timerBadgeKind, modeBadgeKind } from '@/components/TypeBadge';
 import { usePlatformStatus } from '@/hooks/usePlatformStatus';
 import ShareWinButton from '@/components/ShareWinButton';
+import GameChat from '@/components/GameChat';
 import { useWallet, useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
 import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from '@solana/spl-token';
@@ -853,6 +854,11 @@ async function handleWithdraw(bet) {
             )}
           </div>
         </div>
+        {game?.id && (
+          <div style={{ marginTop: '24px' }}>
+            <GameChat gameId={game.id} />
+          </div>
+        )}
       </main>
     </>
   );
