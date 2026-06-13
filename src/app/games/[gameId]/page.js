@@ -84,7 +84,10 @@ export default function GamePage() {
   async function fetchGame() {
     try {
       const res = await fetch(`${API_URL}/api/games/${gameId}`);
+      // Don't overwrite a good game with an error body on a transient non-200.
+      if (!res.ok) throw new Error(`game fetch failed: ${res.status}`);
       const data = await res.json();
+      if (!data || !data.id) throw new Error('bad game payload');
       setGame(data);
       setBets(data.bets || []);
       // Fetch salvation events for Salvador games

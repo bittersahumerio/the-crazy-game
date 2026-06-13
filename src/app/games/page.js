@@ -208,9 +208,14 @@ export default function GamesPage() {
       if (currentFilters.salvador_mode !== undefined && currentFilters.salvador_mode !== '') params.set('salvador_mode', currentFilters.salvador_mode);
 
       const res = await fetch(`${API_URL}/api/games?${params.toString()}`);
+      // Only update the list on a genuinely good response. A transient non-200
+      // (backend restart -> 502, rate limit -> 429) used to blank the list because
+      // data.games was undefined -> setGames([]). Keep the last good data instead.
+      if (!res.ok) throw new Error(`games fetch failed: ${res.status}`);
       const data = await res.json();
-      if (replace) setGames(data.games || []);
-      else setGames(prev => [...prev, ...(data.games || [])]);
+      if (!Array.isArray(data.games)) throw new Error('bad games payload');
+      if (replace) setGames(data.games);
+      else setGames(prev => [...prev, ...data.games]);
       setTotal(data.total || 0);
     } catch (e) {
       console.error('Failed to fetch games:', e);
