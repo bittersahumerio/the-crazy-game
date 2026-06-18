@@ -179,41 +179,37 @@ if (wallets.length > 0) {
   return 'Transaction failed — please try again';
 }
 
-  // Send a transaction and confirm it by HTTP-polling getSignatureStatuses.
-  // The RPC endpoint is the HTTP-only /api/rpc proxy, so web3.js's default
-  // WebSocket-based confirmTransaction never receives a signature notification
-  // and always throws TransactionExpiredTimeoutError after 30s — even though the
-  // tx actually landed. Polling over HTTP confirms for real and kills the false
-  // "transaction failed". Throws err.timedOut on a (now-rare) genuine timeout.
-  async function sendAndConfirmHttp(methodBuilder, { timeoutMs = 45000 } = {}) {
+  // Build, sign, and send a transaction; resolves with the signature as soon as
+  // it's submitted. We intentionally do NOT block on web3.js's confirmTransaction:
+  // the RPC endpoint is the HTTP-only /api/rpc proxy, so its default WebSocket
+  // signature subscription can never fire and would throw a false
+  // TransactionExpiredTimeoutError after 30s. The caller shows "submitted" right
+  // away and confirms in the background via confirmInBackground().
+  async function sendTx(methodBuilder) {
     const tx = await methodBuilder.transaction();
     const { blockhash } = await connection.getLatestBlockhash('confirmed');
     tx.recentBlockhash = blockhash;
     tx.feePayer = publicKey;
     const signed = await anchorWallet.signTransaction(tx);
-    const signature = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: true });
+    return connection.sendRawTransaction(signed.serialize(), { skipPreflight: true });
+  }
+
+  // Confirm in the background by HTTP-polling getSignatureStatuses (no WebSocket).
+  // Shows opts.ok on success and opts.fail only if the tx actually errored on-chain;
+  // otherwise silent. Network errors are swallowed — a missed confirm must never
+  // surface as a scary toast when the tx likely landed (fetchGame reflects truth).
+  async function confirmInBackground(signature, opts = {}) {
     const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      const { value } = await connection.getSignatureStatuses([signature]);
-      const st = value[0];
-      if (st) {
-        if (st.err) {
-          const custom = st.err?.InstructionError?.[1]?.Custom;
-          const hex = typeof custom === 'number' ? ` custom program error: 0x${custom.toString(16)}` : '';
-          const err = new Error(`Transaction failed on-chain.${hex} ${JSON.stringify(st.err)}`);
-          err.signature = signature;
-          throw err;
-        }
-        if (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized') {
-          return signature;
-        }
+    while (Date.now() - start < 60000) {
+      let st = null;
+      try { st = (await connection.getSignatureStatuses([signature])).value[0]; } catch {}
+      if (st?.err) { if (opts.fail) toast.error(opts.fail); return; }
+      if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) {
+        if (opts.ok) toast.success(opts.ok);
+        return;
       }
-      await new Promise((r) => setTimeout(r, 1200));
+      await new Promise((r) => setTimeout(r, 1500));
     }
-    const err = new Error('Confirmation timed out');
-    err.signature = signature;
-    err.timedOut = true;
-    throw err;
   }
 
   async function handlePlaceBet() {
@@ -243,7 +239,7 @@ if (wallets.length > 0) {
       const betSeed = generateBetSeed();
       const betPda = getBetPda(gamePda, betSeed);
       const escrowPda = getEscrowPda(gamePda, betSeed);
-      await sendAndConfirmHttp(
+      const signature = await sendTx(
         program.methods
         .placeBet(amount, new BN(betSeed.toString()))
         .accounts({
@@ -260,6 +256,7 @@ if (wallets.length > 0) {
         })
       );
       toast.success('Bet submitted! Processing...');
+      confirmInBackground(signature, { fail: 'Your bet failed on-chain — please try again' });
       // Refresh after delay to pick up processed bet
       setTimeout(fetchGame, 3000);
       setTimeout(fetchGame, 6000);
@@ -280,17 +277,8 @@ if (wallets.length > 0) {
       }
       fetchGame();
     } catch (e) {
-      if (e?.timedOut) {
-        // Tx was sent (we have a signature) but confirmation polling timed out —
-        // it almost certainly landed; let the backend poll reflect it.
-        toast.success('Bet submitted! Processing...');
-        setTimeout(fetchGame, 3000);
-        setTimeout(fetchGame, 6000);
-        setTimeout(fetchGame, 10000);
-      } else {
-        console.error('BET ERROR:', e?.message || String(e));
-        toast.error(parseError(e));
-      }
+      console.error('BET ERROR:', e?.message || String(e));
+      toast.error(parseError(e));
     } finally {
       setBetLoading(false);
     }
@@ -307,7 +295,7 @@ async function handleWithdraw(bet) {
     const playerTokenAccount = await getAssociatedTokenAddress(TOKEN_MINT, publicKey);
     const hostVault = await getAssociatedTokenAddress(TOKEN_MINT, new PublicKey(game.host)); 
     const amount = new BN(Math.round(parseFloat(betAmount.replace(',', '.')) * 1_000_000)); 
-    await sendAndConfirmHttp(
+    const signature = await sendTx(
       program.methods
       .withdraw()
       .accounts({
@@ -320,16 +308,13 @@ async function handleWithdraw(bet) {
       })
     );
 
-    toast.success('Withdrawn! ✓');
+    toast.success('Withdrawal submitted — processing...');
+    confirmInBackground(signature, { ok: 'Withdrawn! ✓', fail: 'Withdrawal failed on-chain' });
     fetchGame();
+    setTimeout(fetchGame, 4000);
   } catch (e) {
-    if (e?.timedOut) {
-      toast('Submitted — confirming, refresh in a moment');
-      setTimeout(fetchGame, 4000);
-    } else {
-      console.error(e);
-      toast.error(parseError(e));
-    }
+    console.error(e);
+    toast.error(parseError(e));
   } finally {
     setBetLoading(false);
   }
@@ -348,7 +333,7 @@ async function handleWithdraw(bet) {
         [Buffer.from('burn_vault'), TOKEN_MINT.toBuffer()],
         program.programId
       );
-      await sendAndConfirmHttp(
+      const signature = await sendTx(
         program.methods
         .claimJackpot()
         .accounts({
@@ -365,16 +350,12 @@ async function handleWithdraw(bet) {
         })
       );
 
-      toast.success('Jackpot claimed! 🎉');
+      toast.success('Claim submitted — processing...');
+      confirmInBackground(signature, { ok: 'Jackpot claimed! 🎉', fail: 'Claim failed on-chain' });
       fetchGame();
     } catch (e) {
-      if (e?.timedOut) {
-        toast('Submitted — confirming, refresh in a moment');
-        setTimeout(fetchGame, 4000);
-      } else {
-        console.error(e);
-        toast.error(parseError(e));
-      }
+      console.error(e);
+      toast.error(parseError(e));
     } finally {
       setBetLoading(false);
     }
