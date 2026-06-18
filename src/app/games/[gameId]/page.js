@@ -256,7 +256,7 @@ if (wallets.length > 0) {
         })
       );
       toast.success('Bet submitted! Processing...');
-      confirmInBackground(signature, { fail: 'Your bet failed on-chain — please try again' });
+      confirmInBackground(signature, { ok: 'Bet placed! ✓', fail: 'Your bet failed on-chain — please try again' });
       // Refresh after delay to pick up processed bet
       setTimeout(fetchGame, 3000);
       setTimeout(fetchGame, 6000);
