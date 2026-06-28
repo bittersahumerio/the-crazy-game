@@ -511,9 +511,12 @@ async function handleWithdraw(bet) {
                 ) : (
                   salvations.map((s, i) => {
                     const username = playerUsernames[s.recipient];
-                    const playerSalvCount = salvations.filter((x, j) => j >= i && x.recipient === s.recipient).length > 0
-                      ? salvations.slice(0, i + 1).filter(x => x.recipient === s.recipient).length
-                      : 1;
+                    // SAVE # = this player's own running save count, chronological. Prefer the
+                    // indexer-computed recipient_save_number; fall back to an order-independent
+                    // count by global bounty_number. (The events array is newest-first — the old
+                    // slice-by-array-index logic counted from the top and inverted the number.)
+                    const playerSalvCount = s.recipient_save_number
+                      ?? salvations.filter(x => x.recipient === s.recipient && x.bounty_number <= s.bounty_number).length;
                     return (
                       <div key={i} style={{
                         display: 'grid',
