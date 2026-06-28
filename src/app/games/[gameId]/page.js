@@ -93,7 +93,7 @@ export default function GamePage() {
       // Fetch salvation events for Salvador games
       if (data.salvador_mode > 0) {
         try {
-          const evRes = await fetch(`${API_URL}/api/games/${data.id}/events?limit=100`);
+          const evRes = await fetch(`${API_URL}/api/games/${data.id}/events?type=Salvation&limit=500`);
           const evData = await evRes.json();
           setSalvations((evData.events || []).filter(e => e.event_type === 'Salvation').map(e => {
             const d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
