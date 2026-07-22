@@ -8,27 +8,13 @@ import TypeBadge, { timerBadgeKind, modeBadgeKind } from '@/components/TypeBadge
 import { usePlatformStatus } from '@/hooks/usePlatformStatus';
 import ShareWinButton from '@/components/ShareWinButton';
 import { useWallet, useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
-import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, Transaction } from '@solana/web3.js';
-import { getAssociatedTokenAddress, createAssociatedTokenAccountIdempotentInstruction, createSyncNativeInstruction, createCloseAccountInstruction, createTransferCheckedInstruction, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from '@solana/spl-token';
 import { BN } from '@coral-xyz/anchor';
-import { getProgram, getGameVaultPda, getBetPda, getEscrowPda, generateBetSeed, getTokenInfo, CONFIG_PDA, OPERATOR_TREASURY, INSANITY_BET_FEE_LAMPORTS, getHostFeeVaultPda } from '@/lib/program';
+import { getProgram, getGameVaultPda, getBetPda, getEscrowPda, generateBetSeed, TOKEN_MINT, CONFIG_PDA } from '@/lib/program';
 import toast from 'react-hot-toast';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-
-// [SOL games] For SOL-denominated games the on-chain token is wSOL, but players only ever touch native
-// SOL. We wrap SOL -> wSOL atomically before a bet pulls from the ATA, and unwrap (close the ATA) right
-// after any payout, so wSOL is never left standing in the player's wallet.
-const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
-function wsolWrapIxs(owner, ata, lamports, tokenProgram) {
-  return [
-    createAssociatedTokenAccountIdempotentInstruction(owner, ata, owner, WSOL_MINT, tokenProgram),
-    SystemProgram.transfer({ fromPubkey: owner, toPubkey: ata, lamports }),
-    createSyncNativeInstruction(ata, tokenProgram),
-  ];
-}
-const wsolEnsureAtaIx = (owner, ata, tokenProgram) => createAssociatedTokenAccountIdempotentInstruction(owner, ata, owner, WSOL_MINT, tokenProgram);
-const wsolCloseIx = (owner, ata, tokenProgram) => createCloseAccountInstruction(ata, owner, owner, [], tokenProgram);
 
 function ROIBar({ current, target }) {
   const pct = Math.min((current / target) * 100, 100);
@@ -69,9 +55,6 @@ export default function GamePage() {
   const [roiCollapsed, setRoiCollapsed] = useState(true);
   const [middleCollapsed, setMiddleCollapsed] = useState(true);
   const [loading, setLoading] = useState(true);
-  // [img] Mirror the games-list card: if the token logo URL fails to load, fall back to the letter badge.
-  // Without an onError the detail page just rendered a broken image box and the placeholder never appeared.
-  const [imgFailed, setImgFailed] = useState(false);
   const [timeLeft, setTimeLeft] = useState(0);
   const { connected, publicKey } = useWallet();
   const { connection } = useConnection();
@@ -83,58 +66,11 @@ export default function GamePage() {
   const [middleVisible, setMiddleVisible] = useState(50);
   const [infoTab, setInfoTab] = useState('INFO');
   const [salvations, setSalvations] = useState([]);
-  const [claimedJackpot, setClaimedJackpot] = useState(null);
-  const [tokenInfo, setTokenInfo] = useState(null);
-  // [host fee] For a SOL game, the host's 1% fee accrues in a dedicated on-chain wSOL vault; the host
-  // collects it (unwraps to SOL) from this page. { vault, amount } once loaded, null otherwise.
-  const [hostFeesAccrued, setHostFeesAccrued] = useState(null);
-  // [v10] The game's token, resolved on-chain from its mint (decimals / token program / symbol).
-  // Any admin-onboarded mint works here with zero hardcoding.
-  const isWsolGame = !!(tokenInfo && tokenInfo.mint.equals(WSOL_MINT));
-  const isHost = !!(publicKey && game && publicKey.toString() === game.host);
-  const DEC = tokenInfo ? 10 ** tokenInfo.decimals : 1_000_000;
-  const SYM = isWsolGame ? 'SOL' : (tokenInfo?.symbol ?? '');  // [SOL games] always show "SOL", never "wSOL"
-  // [SOL games] SOL is 9-decimal and holds meaningful sub-0.01 values (a 0.005 min bet, a 0.0048 pool
-  // slice), so a fixed 2 decimals collapses them all to 0.00/0.01 and makes the whole card look broken.
-  // Show more precision for wSOL (extra for values under 1); USDC/GRID keep the familiar 2dp — unchanged.
-  const money = (n) => {
-    const v = Number(n);
-    const maxFrac = isWsolGame ? (Math.abs(v) > 0 && Math.abs(v) < 1 ? 5 : 3) : 2;
-    return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: Math.max(2, maxFrac) });
-  };
-
-  // [host fee] Load the host's accrued fees for a SOL game: read host_vault off the on-chain game account,
-  // then its wSOL balance. Only for the connected host (the collect action is host-only). Non-SOL games
-  // accrue host fees directly into the host's normal token wallet, so they need no collect UI here.
-  useEffect(() => {
-    if (!isWsolGame || !isHost || !game?.id) { setHostFeesAccrued(null); return; }
-    let cancelled = false;
-    (async () => {
-      try {
-        // [v14] host-fee vault is a program PDA (host = token authority), derivable from the game PDA alone —
-        // no on-chain game fetch needed, and it still resolves after the game account is closed.
-        const hv = getHostFeeVaultPda(new PublicKey(game.id));
-        let amt = 0;
-        try { const bal = await connection.getTokenAccountBalance(hv); amt = parseInt(bal.value.amount); } catch { amt = 0; }
-        if (!cancelled) setHostFeesAccrued({ vault: hv.toString(), amount: amt });
-      } catch (e) { if (!cancelled) setHostFeesAccrued(null); }
-    })();
-    return () => { cancelled = true; };
-  }, [isWsolGame, isHost, game?.id, game?.pool_balance, connection]);
   useEffect(() => {
     fetchGame();
     const interval = setInterval(fetchGame, 10_000);
     return () => clearInterval(interval);
   }, [gameId]);
-
-  useEffect(() => {
-    if (!game?.token_mint || !connection) return;
-    let cancelled = false;
-    getTokenInfo(connection, game.token_mint)
-      .then(ti => { if (!cancelled) setTokenInfo(ti); })
-      .catch(e => console.error('token info load failed', e));
-    return () => { cancelled = true; };
-  }, [game?.token_mint, connection]);
 
   useEffect(() => {
     if (!game) return;
@@ -147,32 +83,19 @@ export default function GamePage() {
   async function fetchGame() {
     try {
       const res = await fetch(`${API_URL}/api/games/${gameId}`);
-      const data = await res.json().catch(() => null);
-      // A just-created game isn't indexed for a beat, so the backend 404s. Its error body ({error:'...'}) is
-      // TRUTHY, so setting it as `game` sailed straight past the `if (!game)` guard below and crashed the
-      // render on undefined fields — which is why the page needed a manual reload. Bail out instead; the 10s
-      // poll self-heals the moment the indexer writes the game.
-      if (!res.ok || !data || !data.id) return;
+      const data = await res.json();
       setGame(data);
       setBets(data.bets || []);
-      // Fetch events: salvations (Salvador games) + the actual jackpot amount (claimed games).
-      if (data.salvador_mode > 0 || data.jackpot_claimed) {
+      // Fetch salvation events for Salvador games
+      if (data.salvador_mode > 0) {
         try {
           const evRes = await fetch(`${API_URL}/api/games/${data.id}/events?limit=100`);
           const evData = await evRes.json();
-          const evs = evData.events || [];
-          setSalvations(evs.filter(e => e.event_type === 'Salvation').map(e => {
+          setSalvations((evData.events || []).filter(e => e.event_type === 'Salvation').map(e => {
             const d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
             return { ...d, created_at: e.created_at };
           }));
-          const jc = evs.find(e => e.event_type === 'JackpotClaimed');
-          if (jc) {
-            const d = typeof jc.data === 'string' ? JSON.parse(jc.data) : jc.data;
-            // JackpotClaimed amounts are stored as HEX strings (base units) in the event data; divide by DEC at render.
-            const gross = parseInt(d.grossJackpot || d.amount, 16);
-            if (!isNaN(gross)) setClaimedJackpot(gross);
-          }
-        } catch (e) { console.error('Failed to fetch events:', e); }
+        } catch (e) { console.error('Failed to fetch salvations:', e); }
       }
       // Fetch usernames for all players
 const wallets = [...new Set((data.bets || []).map(b => b.player))];
@@ -202,7 +125,7 @@ if (wallets.length > 0) {
   }
 
   function formatAmount(amount) {
-    return money(parseInt(amount) / DEC);
+    return (parseInt(amount) / 1_000_000).toFixed(2);
   }
 
   function shortAddress(addr) {
@@ -223,15 +146,11 @@ if (wallets.length > 0) {
       <Navbar />
       <div style={{ textAlign: 'center', padding: '80px', color: 'var(--text-secondary)' }}>
         GAME NOT FOUND
-        <div style={{ fontSize: '12px', marginTop: '12px', opacity: 0.7 }}>
-          If you just created it, it may still be indexing — this page refreshes itself.
-        </div>
       </div>
     </>
   );
 
-  const liveJackpot = Math.max(0, (parseInt(game.pool_balance) - parseInt(game.reserved_balance)) / DEC);
-  const jackpot = (game.jackpot_claimed && claimedJackpot != null) ? claimedJackpot / DEC : liveJackpot;
+  const jackpot = Math.max(0, (parseInt(game.pool_balance) - parseInt(game.reserved_balance)) / 1_000_000);
 
   function parseError(e) {
   const str = JSON.stringify(e) || '';
@@ -256,94 +175,48 @@ if (wallets.length > 0) {
   return 'Transaction failed — please try again';
 }
 
-  // [v10] Build, sign, send, then HTTP-POLL confirm. The frontend RPC proxy has NO WebSocket, so
-  // anchor's .rpc() confirmation false-fails even when the tx lands (the "transaction failed" toast
-  // on a bet/withdraw/claim that actually succeeded). Poll getSignatureStatuses instead — same
-  // pattern the create page and indexer use.
-  async function sendAndConfirmIxs(ixs) {
-    const tx = new Transaction();
-    ixs.forEach(ix => tx.add(ix));
-    tx.feePayer = publicKey;
-    tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
-    const signed = await anchorWallet.signTransaction(tx);
-    const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: true, maxRetries: 5 });
-    const tid = toast.loading('Confirming on-chain…');
-    try {
-      const deadline = Date.now() + 60000;
-      while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 2000));
-        const st = (await connection.getSignatureStatuses([sig])).value[0];
-        if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) {
-          if (st.err) throw new Error('tx failed: ' + JSON.stringify(st.err));
-          return sig;
-        }
-      }
-      throw new Error('confirmation timeout — it may still have landed; refresh to check');
-    } finally {
-      toast.dismiss(tid);
-    }
-  }
-
   async function handlePlaceBet() {
     if (!connected || !publicKey || !anchorWallet) return toast.error('Connect wallet first');
-    if (!tokenInfo) return toast.error('Loading token info, try again in a moment');
     if (!betAmount || parseFloat(betAmount.replace(',', '.')) <= 0) return toast.error('Enter a bet amount');
-    const minBet = parseInt(game.min_bet) / DEC;
-    if (parseFloat(betAmount.replace(',', '.')) < minBet) return toast.error(`Minimum bet is ${money(minBet)} ${SYM}`);
-
-    const isWsol = tokenInfo.mint.equals(WSOL_MINT);
-    const amountLamports = Math.round(parseFloat(betAmount.replace(',', '.')) * DEC);
+    const minBet = parseInt(game.min_bet) / 1_000_000;
+    if (parseFloat(betAmount.replace(',', '.')) < minBet) return toast.error(`Minimum bet is $${minBet.toFixed(2)}`);
 
     // Pre-validate balance
     try {
-      if (isWsol) {
-        // [SOL games] player bets native SOL (wrapped in the same tx); need bet + ~0.005 for rent/fees.
-        const sol = await connection.getBalance(publicKey);
-        if (sol < amountLamports + 5_000_000) return toast.error('Insufficient SOL (bet amount + ~0.005 for fees)');
-      } else {
-        const playerTokenAccount = await getAssociatedTokenAddress(tokenInfo.mint, publicKey, false, tokenInfo.tokenProgram);
-        const balance = await connection.getTokenAccountBalance(playerTokenAccount);
-        if (parseInt(balance.value.amount) < amountLamports) return toast.error('Insufficient funds in your wallet');
-      }
-    } catch {
-      // Token account doesn't exist yet — will fail on-chain anyway (non-wSOL path)
+      const playerTokenAccount = await getAssociatedTokenAddress(TOKEN_MINT, publicKey);
+      const balance = await connection.getTokenAccountBalance(playerTokenAccount);
+      const balanceLamports = parseInt(balance.value.amount);
+      if (balanceLamports < Math.round(parseFloat(betAmount.replace(',', '.')) * 1_000_000)) {
+        return toast.error('Insufficient funds in your wallet');
     }
+} catch {
+  // Token account doesn't exist yet — will fail on-chain anyway
+}
 
     setBetLoading(true);
     try {
       const program = getProgram(anchorWallet, connection);
       const gamePda = new PublicKey(game.id);
-      const playerTokenAccount = await getAssociatedTokenAddress(tokenInfo.mint, publicKey, false, tokenInfo.tokenProgram);
-      const amount = new BN(amountLamports);
+      const playerTokenAccount = await getAssociatedTokenAddress(TOKEN_MINT, publicKey);
+      const amount = new BN(Math.round(parseFloat(betAmount.replace(',', '.')) * 1_000_000));
       const betSeed = generateBetSeed();
       const betPda = getBetPda(gamePda, betSeed);
       const escrowPda = getEscrowPda(gamePda, betSeed);
-      const betIx = await program.methods
+      await program.methods
         .placeBet(amount, new BN(betSeed.toString()))
         .accounts({
           game: gamePda,
           bet: betPda,
           escrow: escrowPda,
           player: publicKey,
-          tokenMint: tokenInfo.mint,
+          tokenMint: TOKEN_MINT,
           playerTokenAccount,
           config: CONFIG_PDA,
-          tokenProgram: tokenInfo.tokenProgram,
+          tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
           rent: SYSVAR_RENT_PUBKEY,
         })
-        .instruction();
-      const ixs = [];
-      // [SOL games] wrap the bet amount of native SOL into the wSOL ATA before place_bet pulls from it.
-      if (isWsol) ixs.push(...wsolWrapIxs(publicKey, playerTokenAccount, amountLamports, tokenInfo.tokenProgram));
-      // [Insanity economics] Insanity (mode 3) bets pay a small SOL fee to fund the ORAO VRF this game uses.
-      if (game.salvador_mode === 3) {
-        ixs.push(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: OPERATOR_TREASURY, lamports: INSANITY_BET_FEE_LAMPORTS }));
-      }
-      ixs.push(betIx);
-      // [SOL games] close the now-empty wSOL ATA -> its rent comes back to the player as native SOL.
-      if (isWsol) ixs.push(wsolCloseIx(publicKey, playerTokenAccount, tokenInfo.tokenProgram));
-      await sendAndConfirmIxs(ixs);
+        .rpc({ skipPreflight: true });
       toast.success('Bet submitted! Processing...');
       // Refresh after delay to pick up processed bet
       setTimeout(fetchGame, 3000);
@@ -379,7 +252,6 @@ if (wallets.length > 0) {
   }
 async function handleWithdraw(bet) {
   if (!connected || !publicKey || !anchorWallet) return toast.error('Connect wallet first')
-  if (!tokenInfo) return toast.error('Loading token info, try again in a moment');
 
   setBetLoading(true);
   try {
@@ -387,8 +259,10 @@ async function handleWithdraw(bet) {
     const gamePda = new PublicKey(game.id);
     const gameVaultPda = getGameVaultPda(gamePda);
     const betPda = getBetPda(gamePda, bet.bet_seed);
-    const playerTokenAccount = await getAssociatedTokenAddress(tokenInfo.mint, publicKey, false, tokenInfo.tokenProgram);
-    const withdrawIx = await program.methods
+    const playerTokenAccount = await getAssociatedTokenAddress(TOKEN_MINT, publicKey);
+    const hostVault = await getAssociatedTokenAddress(TOKEN_MINT, new PublicKey(game.host)); 
+    const amount = new BN(Math.round(parseFloat(betAmount.replace(',', '.')) * 1_000_000)); 
+    const tx = await program.methods
       .withdraw()
       .accounts({
         game: gamePda,
@@ -396,32 +270,11 @@ async function handleWithdraw(bet) {
         player: publicKey,
         playerTokenAccount,
         gameVault: gameVaultPda,
-        tokenMint: tokenInfo.mint,
-        tokenProgram: tokenInfo.tokenProgram,
+        tokenProgram: TOKEN_PROGRAM_ID,
       })
-      .instruction();
-    // [SOL games] wSOL games: ensure the wSOL ATA exists before the payout, then unwrap (close) it after.
-    const isWsol = tokenInfo.mint.equals(WSOL_MINT);
-    const ixs = [];
-    if (isWsol) ixs.push(wsolEnsureAtaIx(publicKey, playerTokenAccount, tokenInfo.tokenProgram));
-    ixs.push(withdrawIx);
-    // [bet-close] NON-SALVADOR games only: close the bet in the SAME tx so the player gets their ~0.0024 SOL of
-    // account rent back immediately, at zero operator cost. close_bet's constraint short-circuits on
-    // `bet.withdrawn`, which the withdraw ix above sets earlier in this very tx. NOT for Salvador games — the
-    // game is still active here, and a player can still be owed a bounty that pay_bounty settles by pointing at
-    // their (non-pending) bet account; deleting it would make that bounty unpayable. Salvador bets get their
-    // rent back from the post-game close sweep instead, where the game is over and pay_bounty can't run.
-    if (game.salvador_mode === 0) {
-      const closeIx = await program.methods
-        .closeBet()
-        .accounts({ game: gamePda, bet: betPda, recipient: publicKey, caller: publicKey })
-        .instruction();
-      ixs.push(closeIx);
-    }
-    if (isWsol) ixs.push(wsolCloseIx(publicKey, playerTokenAccount, tokenInfo.tokenProgram));
-    await sendAndConfirmIxs(ixs);
+      .rpc({ skipPreflight: true });
 
-    toast.success(game.salvador_mode === 0 ? 'Withdrawn — rent refunded! ✓' : 'Withdrawn! ✓');
+    toast.success('Withdrawn! ✓');
     fetchGame();
   } catch (e) {
   console.error(e);
@@ -430,62 +283,21 @@ async function handleWithdraw(bet) {
     setBetLoading(false);
   }
 }
-
-  // [v11] Claim a reserved salvador bounty on this bet (pay_bounty now reserves it instead of paying out).
-  async function handleClaimBounty(bet) {
-    if (!connected || !publicKey || !anchorWallet) return toast.error('Connect wallet first');
-    if (!tokenInfo) return toast.error('Loading token info, try again in a moment');
-    setBetLoading(true);
-    try {
-      const program = getProgram(anchorWallet, connection);
-      const gamePda = new PublicKey(game.id);
-      const gameVaultPda = getGameVaultPda(gamePda);
-      const betPda = getBetPda(gamePda, bet.bet_seed);
-      const playerTokenAccount = await getAssociatedTokenAddress(tokenInfo.mint, publicKey, false, tokenInfo.tokenProgram);
-      const claimIx = await program.methods
-        .claimBounty()
-        .accounts({
-          game: gamePda,
-          bet: betPda,
-          player: publicKey,
-          playerTokenAccount,
-          gameVault: gameVaultPda,
-          tokenMint: tokenInfo.mint,
-          tokenProgram: tokenInfo.tokenProgram,
-        })
-        .instruction();
-      const isWsol = tokenInfo.mint.equals(WSOL_MINT);
-      const ixs = [];
-      if (isWsol) ixs.push(wsolEnsureAtaIx(publicKey, playerTokenAccount, tokenInfo.tokenProgram));
-      ixs.push(claimIx);
-      if (isWsol) ixs.push(wsolCloseIx(publicKey, playerTokenAccount, tokenInfo.tokenProgram));
-      await sendAndConfirmIxs(ixs);
-      toast.success('Bounty claimed! 🎉');
-      fetchGame();
-    } catch (e) {
-      console.error(e);
-      toast.error(parseError(e));
-    } finally {
-      setBetLoading(false);
-    }
-  }
-
   async function handleClaimJackpot() {
     if (!connected || !publicKey || !anchorWallet) return toast.error('Connect wallet first')
-    if (!tokenInfo) return toast.error('Loading token info, try again in a moment');
 
     setBetLoading(true);
     try {
       const program = getProgram(anchorWallet, connection);
       const gamePda = new PublicKey(game.id);
       const gameVaultPda = getGameVaultPda(gamePda);
-      const claimantTokenAccount = await getAssociatedTokenAddress(tokenInfo.mint, publicKey, false, tokenInfo.tokenProgram);
+      const claimantTokenAccount = await getAssociatedTokenAddress(TOKEN_MINT, publicKey);
 
       const [burnVaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('burn_vault'), tokenInfo.mint.toBuffer()],
+        [Buffer.from('burn_vault'), TOKEN_MINT.toBuffer()],
         program.programId
       );
-      const claimIx = await program.methods
+      const tx = await program.methods
         .claimJackpot()
         .accounts({
           game: gamePda,
@@ -494,18 +306,12 @@ async function handleWithdraw(bet) {
           gameVault: gameVaultPda,
           config: CONFIG_PDA,
           burnVault: burnVaultPda,
-          tokenMint: tokenInfo.mint,
-          tokenProgram: tokenInfo.tokenProgram,
+          tokenMint: TOKEN_MINT,
+          tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
           rent: SYSVAR_RENT_PUBKEY,
         })
-        .instruction();
-      const isWsol = tokenInfo.mint.equals(WSOL_MINT);
-      const ixs = [];
-      if (isWsol) ixs.push(wsolEnsureAtaIx(publicKey, claimantTokenAccount, tokenInfo.tokenProgram));
-      ixs.push(claimIx);
-      if (isWsol) ixs.push(wsolCloseIx(publicKey, claimantTokenAccount, tokenInfo.tokenProgram));
-      await sendAndConfirmIxs(ixs);
+        .rpc({ skipPreflight: true });
 
       toast.success('Jackpot claimed! 🎉');
       fetchGame();
@@ -518,60 +324,11 @@ async function handleWithdraw(bet) {
     }
   }
 
-  // [host fee] Collect the host's accrued fees for a SOL game. host_vault is a dedicated host-owned wSOL
-  // account (recorded at fund_game); the host — its owner — moves the accrued wSOL into a throwaway
-  // canonical ATA and closes it, which unwraps to native SOL. The dedicated vault itself stays open (rent
-  // only), so it keeps accruing future host fees. Non-SOL games need no such flow (fees land in the wallet).
-  async function handleCollectHostFees() {
-    if (!connected || !publicKey || !anchorWallet) return toast.error('Connect wallet first');
-    if (!tokenInfo) return toast.error('Loading token info, try again in a moment');
-    setBetLoading(true);
-    try {
-      const gamePda = new PublicKey(game.id);
-      // [v14] host_fee_vault is a program PDA whose token authority is the host, so the host signs the transfer
-      // out directly (no on-chain claim instruction). Derive it from the game PDA — works even post-close.
-      const hostVault = getHostFeeVaultPda(gamePda);
-      let accrued = 0;
-      try { const bal = await connection.getTokenAccountBalance(hostVault); accrued = parseInt(bal.value.amount); } catch { accrued = 0; }
-      if (!accrued) { toast('No host fees to collect yet'); return; }
-      const canonical = await getAssociatedTokenAddress(WSOL_MINT, publicKey, false, TOKEN_PROGRAM_ID);
-      const ixs = [
-        createAssociatedTokenAccountIdempotentInstruction(publicKey, canonical, publicKey, WSOL_MINT, TOKEN_PROGRAM_ID),
-        createTransferCheckedInstruction(hostVault, WSOL_MINT, canonical, publicKey, accrued, tokenInfo.decimals, [], TOKEN_PROGRAM_ID),
-        createCloseAccountInstruction(canonical, publicKey, publicKey, [], TOKEN_PROGRAM_ID),
-      ];
-      await sendAndConfirmIxs(ixs);
-      toast.success(`Collected ${formatAmount(accrued)} ${SYM} in host fees ✓`);
-      setHostFeesAccrued({ vault: hostVault.toString(), amount: 0 });
-      fetchGame();
-    } catch (e) {
-      console.error(e);
-      toast.error(parseError(e));
-    } finally {
-      setBetLoading(false);
-    }
-  }
-
-  // [bounty] Claim every reserved salvation bounty the connected wallet is owed on this game. Usually one,
-  // but a wallet can hold several — each is its own bet-scoped claim tx, run sequentially.
-  async function handleClaimAllBounties() {
-    const mine = bets.filter(b => b.player === publicKey?.toString() && parseInt(b.bounty_owed || 0) > 0);
-    for (const b of mine) {
-      await handleClaimBounty(b);
-    }
-  }
-
     return (
     <>
       <Navbar />
       <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '40px 24px' }}>
-        <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '20px' }}>
-          <div style={{ width: '88px', height: '88px', borderRadius: '16px', overflow: 'hidden', background: 'var(--bg)', border: '1px solid var(--border)', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {(game.image_url || tokenInfo?.image) && !imgFailed
-              ? <img src={game.image_url || tokenInfo.image} alt="" onError={() => setImgFailed(true)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : <span style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)', fontSize: '28px' }}>{(SYM || game.name || '?').slice(0, 3).toUpperCase()}</span>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '16px', flexWrap: 'wrap', minWidth: 0 }}>
+        <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'baseline', gap: '16px' }}>
   <span style={{
     fontFamily: 'var(--font-display)',
     fontSize: '48px',
@@ -604,7 +361,6 @@ async function handleWithdraw(bet) {
   </span>
   <TypeBadge kind={timerBadgeKind(game)} size={26} />
   <TypeBadge kind={modeBadgeKind(game)} size={26} />
-  </div>
 </div>
         <div className="grid-3-stack" style={{
           gap: '1px',
@@ -612,10 +368,10 @@ async function handleWithdraw(bet) {
           border: '1px solid var(--border)',
           marginBottom: '24px',
         }}>
-          <div style={{ background: 'var(--bg-card)', padding: '20px', textAlign: 'center' }}>
+          <div style={{ background: 'var(--bg-card)', padding: '32px', textAlign: 'center' }}>
             <div style={{
               fontFamily: 'var(--font-display)',
-              fontSize: '36px',
+              fontSize: '48px',
               color: game.is_paused ? 'var(--text-muted)' : timeLeft < 60 ? 'var(--accent-red)' : 'var(--accent)',
               marginBottom: '4px',
             }}>
@@ -626,20 +382,24 @@ async function handleWithdraw(bet) {
             </div>
           </div>
 
-          <div style={{ background: 'var(--bg-card)', padding: '20px', textAlign: 'center' }}>
-            <div style={{ marginBottom: '4px', display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <span style={{ fontFamily: 'var(--font-display)', fontSize: '36px', color: 'var(--text-primary)' }}>{money(jackpot)}</span>
-              {SYM && <span style={{ fontFamily: 'var(--font-display)', fontSize: '20px', color: 'var(--text-secondary)' }}>{SYM}</span>}
+          <div style={{ background: 'var(--bg-card)', padding: '32px', textAlign: 'center' }}>
+            <div style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: '48px',
+              color: 'var(--text-primary)',
+              marginBottom: '4px',
+            }}>
+              ${jackpot.toFixed(2)}
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
               JACKPOT
             </div>
           </div>
 
-          <div style={{ background: 'var(--bg-card)', padding: '20px', textAlign: 'center' }}>
+          <div style={{ background: 'var(--bg-card)', padding: '32px', textAlign: 'center' }}>
             <div style={{
               fontFamily: 'var(--font-display)',
-              fontSize: '36px',
+              fontSize: '48px',
               color: 'var(--text-primary)',
               marginBottom: '4px',
             }}>
@@ -697,7 +457,6 @@ async function handleWithdraw(bet) {
                 <div style={{
                   display: 'grid',
                   gridTemplateColumns: '40px 1fr 60px 70px 90px',
-                  minWidth: '460px',
                   padding: '12px 24px',
                   borderBottom: '1px solid var(--border)',
                   fontSize: '11px',
@@ -722,7 +481,6 @@ async function handleWithdraw(bet) {
                       <div key={i} style={{
                         display: 'grid',
                         gridTemplateColumns: '40px 1fr 60px 70px 90px',
-                  minWidth: '460px',
                         padding: '16px 24px',
                         borderBottom: '1px solid var(--border)',
                         alignItems: 'center',
@@ -736,7 +494,7 @@ async function handleWithdraw(bet) {
                         )}</span>
                         <span style={{ color: 'var(--text-muted)' }}>{playerSalvCount}</span>
                         <span style={{ color: 'var(--text-muted)' }}>{(s.bps / 100).toFixed(1)}%</span>
-                        <span style={{ textAlign: 'right', color: '#22c55e', fontFamily: 'var(--font-display)' }}>{money(s.amount / DEC)} {SYM}</span>
+                        <span style={{ textAlign: 'right', color: '#22c55e', fontFamily: 'var(--font-display)' }}>${(s.amount / 1_000_000).toFixed(2)}</span>
                       </div>
                     );
                   })
@@ -789,7 +547,6 @@ async function handleWithdraw(bet) {
             <div style={{
               display: 'grid',
               gridTemplateColumns: '40px 1fr 100px 100px 120px',
-              minWidth: '540px',
               padding: '12px 24px',
               borderBottom: '1px solid var(--border)',
               fontSize: '10px',
@@ -798,7 +555,7 @@ async function handleWithdraw(bet) {
             }}>
               <span>#</span>
               <span>PLAYER</span>
-              <span>AMOUNT{SYM ? ` (${SYM})` : ''}</span>
+              <span>AMOUNT</span>
               <span style={{ display: 'inline-flex', alignItems: 'center' }}>ROI TARGET<Tooltip>How much each bet must accumulate before the bettor can withdraw. Once a bet has earned (bet x ROI%) on top of itself, the player can cash out at bet + ROI.</Tooltip></span>
               <span>STATUS</span>
             </div>
@@ -840,7 +597,6 @@ async function handleWithdraw(bet) {
                     <div key={bet.id} data-bet-index={bet.bet_index} style={{
                       display: 'grid',
                       gridTemplateColumns: '40px 1fr 100px 100px 120px',
-              minWidth: '540px',
                       padding: '16px 24px',
                       borderBottom: '1px solid var(--border)',
                       alignItems: 'center',
@@ -860,8 +616,8 @@ async function handleWithdraw(bet) {
                           <span className="desktop-only" style={{ marginLeft: '8px', fontSize: '9px', color: 'var(--accent)', letterSpacing: '0.08em' }}>LAST BET</span>
                         )}
                       </span>
-                      <span style={{ fontSize: '13px' }}>{formatAmount(bet.amount)}</span>
-                      <span style={{ fontSize: '13px' }}>{formatAmount(bet.roi_target)}</span>
+                      <span style={{ fontSize: '13px' }}>${formatAmount(bet.amount)}</span>
+                      <span style={{ fontSize: '13px' }}>${formatAmount(bet.roi_target)}</span>
                       <span style={{ fontSize: '10px', letterSpacing: '0.05em', color: 'var(--text-primary)' }}>
                         {bet.withdrawn ? (
                           <span style={{ color: 'var(--text-muted)' }}>WITHDRAWN</span>
@@ -889,15 +645,6 @@ async function handleWithdraw(bet) {
                           const color = pct >= 90 ? '#f0c040' : pct >= 50 ? 'var(--accent)' : 'var(--text-secondary)';
                           return <span style={{ color, fontWeight: '600' }}>{pct.toFixed(1)}%</span>;
                         })()}
-                        {parseInt(bet.bounty_owed || 0) > 0 && bet.player === publicKey?.toString() && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', marginLeft: '8px' }}>
-                            <button
-                              onClick={() => handleClaimBounty(bet)}
-                              style={{ background: '#f0c040', color: '#000', border: 'none', padding: '4px 10px', fontFamily: 'var(--font-display)', fontSize: '10px', cursor: 'pointer', letterSpacing: '0.05em' }}
-                            >CLAIM {formatAmount(bet.bounty_owed)}</button>
-                            <Tooltip>You earned a salvation bounty on this bet — claim it to your wallet.</Tooltip>
-                          </span>
-                        )}
                       </span>
                     </div>
                   );
@@ -965,12 +712,12 @@ async function handleWithdraw(bet) {
               <h3 style={{ fontSize: '20px', marginBottom: '16px' }}>GAME INFO</h3>
               
               {[
-                { label: 'MIN BET', value: `${formatAmount(game.min_bet)} ${SYM}` },
+                { label: 'MIN BET', value: `$${formatAmount(game.min_bet)}` },
                 { label: 'ROI TARGET', value: `${(game.roi_bps / 100).toFixed(0)}%` },
                 { label: 'HOST FEE', value: `${(game.host_fee_bps / 100).toFixed(0)}%` },
-                { label: 'TOKEN', value: SYM || '—' },
+                { label: 'TOKEN', value: 'USDC' },
                 { label: 'TIMER MODE', value: parseInt(game.timer_mode) === 1 ? `CUMULATIVE (+${Math.round(parseInt(game.time_increment) / 60)}m/bet)` : `FIXED (${Math.round(parseInt(game.timer_duration) / 60)}m reset)` },
-                ...(game.salvador_mode > 0 ? [{ label: 'SALVADOR', value: game.salvador_mode === 1 ? `FIXED ${(game.salvador_bps / 100).toFixed(1)}%` : game.salvador_mode === 3 ? 'INSANITY (VRF 0.2-50%)' : `PROGRESSIVE ${(game.salvador_bps / 100).toFixed(1)}%-${(game.salvador_cap_bps / 100).toFixed(1)}% (+${(game.salvador_step_bps / 100).toFixed(1)}%)` }] : []),
+                ...(game.salvador_mode > 0 ? [{ label: 'SALVADOR', value: game.salvador_mode === 1 ? `FIXED ${(game.salvador_bps / 100).toFixed(1)}%` : `PROGRESSIVE ${(game.salvador_bps / 100).toFixed(1)}%-${(game.salvador_cap_bps / 100).toFixed(1)}% (+${(game.salvador_step_bps / 100).toFixed(1)}%)` }] : []),
               ].map(row => (
                 <div key={row.label} style={{
                   display: 'flex',
@@ -985,70 +732,8 @@ async function handleWithdraw(bet) {
                   <span>{row.value}</span>
                 </div>
               ))}
-              {game.token_mint && (
-                <div
-                  onClick={() => { navigator.clipboard.writeText(game.token_mint); toast.success('Token mint copied'); }}
-                  title="Click to copy the token mint address"
-                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', fontSize: '13px', cursor: 'pointer' }}
-                >
-                  <span style={{ color: 'var(--text-muted)', letterSpacing: '0.05em', fontSize: '11px' }}>TOKEN MINT</span>
-                  <span style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--accent)' }}>{`${game.token_mint.slice(0, 4)}…${game.token_mint.slice(-4)}`} ⧉</span>
-                </div>
-              )}
-              {/* [buy-in] Real-token games only (not SOL, not USDC — both are trivially held): the token's Jupiter page (price/liquidity/warnings + a buy widget preset to Sell SOL -> Buy token), no ref. */}
-              {!isWsolGame && game.token_mint && game.token_mint !== 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' && SYM && (
-                <a href={`https://jup.ag/tokens/${game.token_mint}`} target="_blank" rel="noopener noreferrer"
-                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', fontSize: '13px', textDecoration: 'none', borderTop: '1px solid var(--border)' }}>
-                  <span style={{ color: 'var(--text-muted)', letterSpacing: '0.05em', fontSize: '11px' }}>NEED {SYM}?</span>
-                  <span style={{ color: 'var(--accent)', fontSize: '12px', fontWeight: '600' }}>GET {SYM} ON JUPITER →</span>
-                </a>
-              )}
 
             </div>
-
-           {/* [bounty] Prominent, thumb-sized claim CTA. The per-row CLAIM button is easy to miss on mobile;
-               this surfaces any bounty the connected wallet is owed as a primary action, above the fold. */}
-           {(() => {
-             const myBounties = bets.filter(b => b.player === publicKey?.toString() && parseInt(b.bounty_owed || 0) > 0);
-             if (!myBounties.length) return null;
-             const total = myBounties.reduce((s, b) => s + parseInt(b.bounty_owed || 0), 0);
-             return (
-               <div style={{ background: '#f0c04015', border: '1px solid #f0c040', padding: '16px', marginBottom: '12px', width: '100%', boxSizing: 'border-box' }}>
-                 <div style={{ fontSize: '12px', color: '#f0c040', letterSpacing: '0.1em', marginBottom: '8px', textAlign: 'center' }}>
-                   SALVATION BOUNTY{myBounties.length > 1 ? ` — ${myBounties.length} BETS` : ''}
-                 </div>
-                 <button
-                   onClick={handleClaimAllBounties}
-                   disabled={betLoading}
-                   style={{ background: '#f0c040', color: '#000', border: 'none', padding: '18px', fontFamily: 'var(--font-display)', fontSize: '22px', letterSpacing: '0.05em', cursor: betLoading ? 'not-allowed' : 'pointer', width: '100%', opacity: betLoading ? 0.6 : 1 }}
-                 >
-                   {betLoading ? 'CLAIMING…' : `CLAIM ${formatAmount(total)} ${SYM}`}
-                 </button>
-                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px', textAlign: 'center' }}>
-                   You saved another player, so this bounty is reserved for you. Collect it to your wallet.
-                 </div>
-               </div>
-             );
-           })()}
-
-           {/* [host fee] SOL-game host: collect accrued host fees (unwraps the dedicated wSOL vault to SOL). */}
-           {isHost && isWsolGame && hostFeesAccrued && hostFeesAccrued.amount > 0 && (
-             <div style={{ background: '#00ff8815', border: '1px solid var(--accent)', padding: '16px', marginBottom: '12px', width: '100%', boxSizing: 'border-box' }}>
-               <div style={{ fontSize: '12px', color: 'var(--accent)', letterSpacing: '0.1em', marginBottom: '8px', textAlign: 'center' }}>
-                 YOUR HOST FEES
-               </div>
-               <button
-                 onClick={handleCollectHostFees}
-                 disabled={betLoading}
-                 style={{ background: 'var(--accent)', color: '#000', border: 'none', padding: '16px', fontFamily: 'var(--font-display)', fontSize: '20px', letterSpacing: '0.05em', cursor: betLoading ? 'not-allowed' : 'pointer', width: '100%', opacity: betLoading ? 0.6 : 1 }}
-               >
-                 {betLoading ? 'COLLECTING…' : `COLLECT ${formatAmount(hostFeesAccrued.amount)} ${SYM}`}
-               </button>
-               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px', textAlign: 'center' }}>
-                 Your 1% host fee accrues here as players bet. Let it build up before collecting — each claim costs a little SOL in network fees.
-               </div>
-             </div>
-           )}
 
            {!loading && timeLeft === 0 && game.timer_end < Math.floor(Date.now() / 1000) && !game.jackpot_claimed && game.last_bettor === publicKey?.toString() ? (
   (() => {
@@ -1091,7 +776,7 @@ async function handleWithdraw(bet) {
           opacity: betLoading ? 0.6 : 1,
         }}
       >
-        {betLoading ? 'CLAIMING...' : `CLAIM JACKPOT ${money(jackpot)} ${SYM}`}
+        {betLoading ? 'CLAIMING...' : `CLAIM JACKPOT $${jackpot.toFixed(2)}`}
       </button>
     );
   })()
@@ -1099,7 +784,7 @@ async function handleWithdraw(bet) {
               <>
                 <input
                   type="text"
-                  placeholder={`Min: ${money(game.min_bet / DEC)} ${SYM}`}
+                  placeholder={`Min: $${(game.min_bet / 1_000_000).toFixed(2)}`}
                   value={betAmount}
                   onChange={e => setBetAmount(e.target.value.replace(',', '.'))}
                   onKeyDown={e => { if (e.key === 'Enter' && !betLoading && !platformPaused) handlePlaceBet(); }}
@@ -1136,16 +821,6 @@ async function handleWithdraw(bet) {
                 >
                   {platformPaused ? 'PLATFORM PAUSED' : betLoading ? 'PLACING...' : 'PLACE BET'}
                 </button>
-                {game.salvador_mode === 3 && (
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px', textAlign: 'center' }}>
-                    Insanity games add a ~0.0003 SOL fee per bet to fund the on-chain randomness (VRF).
-                  </div>
-                )}
-                {isWsolGame && (
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px', textAlign: 'center' }}>
-                    Heads up: your wallet will show ~0.004 SOL above your bet. That's refundable on-chain account rent (it returns as the game settles), not a fee.
-                  </div>
-                )}
               </>
             ) : (
               <>

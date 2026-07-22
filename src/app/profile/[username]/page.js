@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import Link from 'next/link';
+import { useConnection } from '@solana/wallet-adapter-react';
+import { getTokenInfo } from '@/lib/program';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -33,6 +35,22 @@ export default function PublicProfilePage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [tab, setTab] = useState('history');
+  const { connection } = useConnection();
+  const [tokenInfoByMint, setTokenInfoByMint] = useState({});
+
+  useEffect(() => {
+    if (!connection) return;
+    const mints = [...new Set([...bets.map(b => b.token_mint), ...gamesHosted.map(g => g.token_mint)].filter(Boolean))];
+    const missing = mints.filter(m => !tokenInfoByMint[m]);
+    if (!missing.length) return;
+    let cancelled = false;
+    (async () => {
+      const updates = {};
+      for (const m of missing) { try { updates[m] = await getTokenInfo(connection, m); } catch (e) {} }
+      if (!cancelled && Object.keys(updates).length) setTokenInfoByMint(prev => ({ ...prev, ...updates }));
+    })();
+    return () => { cancelled = true; };
+  }, [bets, gamesHosted, connection]);
   const now = Math.floor(Date.now() / 1000);
 
   useEffect(() => {
@@ -65,6 +83,15 @@ export default function PublicProfilePage() {
 
   function formatAmount(amount) {
     return (parseInt(amount) / 1_000_000).toFixed(2);
+  }
+
+  function fmtTok(amount, mint) {
+    const ti = mint ? tokenInfoByMint[mint] : null;
+    const dec = ti ? 10 ** ti.decimals : 1_000_000;
+    const sym = ti?.symbol ?? 'USDC';
+    const v = parseInt(amount) / dec;
+    const mx = dec >= 1e8 ? (v > 0 && v < 1 ? 5 : 3) : 2;
+    return `${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: Math.max(2, mx) })} ${sym}`;
   }
 
   function shortAddress(addr) {
@@ -195,8 +222,8 @@ export default function PublicProfilePage() {
                       </Link>
                       <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: '8px' }}>#{bet.bet_index}</span>
                     </div>
-                    <div style={{ textAlign: 'right' }}>${formatAmount(bet.amount)}</div>
-                    <div style={{ textAlign: 'right' }}>${formatAmount(bet.roi_target)}</div>
+                    <div style={{ textAlign: 'right' }}>{fmtTok(bet.amount, bet.token_mint)}</div>
+                    <div style={{ textAlign: 'right' }}>{fmtTok(bet.roi_target, bet.token_mint)}</div>
                     <div style={{ textAlign: 'right', fontSize: '11px', color: 'var(--text-muted)' }}>{formatDate(bet.placed_at)}</div>
                     <div style={{ textAlign: 'right', fontSize: '11px', color: bet.withdrawn ? 'var(--text-muted)' : bet.reserved ? 'var(--accent)' : 'var(--text-secondary)' }}>
                       {bet.withdrawn ? 'WITHDRAWN' : bet.reserved ? 'READY' : 'ACTIVE'}
@@ -233,7 +260,7 @@ export default function PublicProfilePage() {
                         {game.name || `#${String(game.game_number).padStart(4, '0')}`}
                         <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: '8px' }}>#{String(game.game_number).padStart(4, '0')}</span>
                       </Link>
-                      <div style={{ textAlign: 'right' }}>${formatAmount(game.pool_balance)}</div>
+                      <div style={{ textAlign: 'right' }}>{fmtTok(game.pool_balance, game.token_mint)}</div>
                       <div style={{ textAlign: 'right' }}>{(game.roi_bps / 100).toFixed(0)}%</div>
                       <div style={{ textAlign: 'right' }}>{game.bet_count}</div>
                       <div style={{ textAlign: 'right', fontSize: '11px', color: isLive ? 'var(--accent)' : 'var(--text-muted)' }}>

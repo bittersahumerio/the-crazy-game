@@ -1,23 +1,17 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Connection } from '@solana/web3.js';
 import Navbar from '@/components/Navbar';
 import TypeBadge, { timerBadgeKind, modeBadgeKind } from '@/components/TypeBadge';
 import HowToPlay from '@/components/HowToPlay';
 import Link from 'next/link';
-import { getTokenInfo, getSelectableTokens } from '@/lib/program';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 const PAGE_SIZE = 50;
-// [v10] Read-only connection to resolve each game's token symbol/decimals (single-account reads, proxy-safe).
-const rpcConnection = new Connection(process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:8899', 'confirmed');
 
-function GameCard({ game, tokenInfo }) {
+function GameCard({ game }) {
   const timeLeft = game.timer_end - Math.floor(Date.now() / 1000);
   const isExpired = timeLeft <= 0;
-  const DEC = tokenInfo ? 10 ** tokenInfo.decimals : 1_000_000;
-  const sym = tokenInfo?.symbol ?? '';
 
   function formatTime(secs) {
     if (secs <= 0) return 'ENDED';
@@ -30,18 +24,7 @@ function GameCard({ game, tokenInfo }) {
   }
 
   function formatAmount(amount) {
-    const v = parseInt(amount) / DEC;
-    const mx = DEC >= 1e8 ? (v > 0 && v < 1 ? 5 : 3) : 2;  // [SOL games] SOL needs sub-0.01 precision; USDC/GRID keep 2dp
-    return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: Math.max(2, mx) });
-  }
-
-  // Compact form for big-number tokens (e.g. 107k, 11M) — used where space is tight, like the MIN BET stat.
-  function formatCompact(amount) {
-    const n = parseInt(amount) / DEC;
-    if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace(/\.0$/, '') + 'B';
-    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, '') + 'M';
-    if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\.0$/, '') + 'k';
-    return n.toLocaleString('en-US', { maximumFractionDigits: DEC >= 1e8 ? (n > 0 && n < 1 ? 5 : 3) : 2 });
+    return (parseInt(amount) / 1_000_000).toFixed(2);
   }
 
   const poolPct = game.initial_deposit > 0
@@ -52,17 +35,12 @@ function GameCard({ game, tokenInfo }) {
     ? 'var(--accent-red)'
     : poolPct >= 200 ? '#f0c040' : 'var(--accent)';
 
-  // Custom uploaded image (future) takes priority; else the token's logo; else a letter badge.
-  const bannerImg = game.image_url || tokenInfo?.image;
-  const [imgFailed, setImgFailed] = useState(false);
-
   return (
     <div
         style={{
           border: '1px solid var(--border)',
           background: 'var(--bg-card)',
-          padding: 0,
-          overflow: 'hidden',
+          padding: '24px',
           cursor: 'pointer',
           transition: 'border-color 0.2s, background 0.2s',
         }}
@@ -76,83 +54,79 @@ function GameCard({ game, tokenInfo }) {
 }}
 onClick={() => window.location.href = `/games/${game.game_number}`}
       >
-        <div style={{ padding: '24px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: '20px', gap: '14px' }}>
-            <div style={{ width: '100px', height: '100px', borderRadius: '16px', overflow: 'hidden', background: 'var(--bg)', border: '1px solid var(--border)', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {bannerImg && !imgFailed
-                ? <img src={bannerImg} alt="" onError={() => setImgFailed(true)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                : <span style={{ color: 'var(--accent)', fontFamily: 'var(--font-display)', fontSize: '32px' }}>{(sym || game.name || '?').slice(0, 3).toUpperCase()}</span>}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <div>
+            <div style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600', marginBottom: '2px' }}>
+              {game.name || `GAME #${String(game.game_number).padStart(4, '0')}`}
             </div>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: '15px', color: 'var(--text-primary)', fontWeight: '600', marginBottom: '4px', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word' }}>
-                {game.name || `GAME #${String(game.game_number).padStart(4, '0')}`}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                <span style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>
-                  #{String(game.game_number).padStart(4, '0')}
-                </span>
-                <TypeBadge kind={timerBadgeKind(game)} size={18} />
-                <TypeBadge kind={modeBadgeKind(game)} size={18} />
-              </div>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                hosted by{' '}
-                {game.host_username ? (
-                  <a href={`/profile/${game.host_username}`}
-                    onClick={e => e.stopPropagation()}
-                    style={{ color: 'var(--text-muted)', textDecoration: 'none', letterSpacing: '0.05em' }}
-                    onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
-                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
-                  >
-                    @{game.host_username}
-                  </a>
-                ) : (
-                  <span>{game.host.slice(0,6)}...{game.host.slice(-4)}</span>
-                )}
-              </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>
+                #{String(game.game_number).padStart(4, '0')}
+              </span>
+              <TypeBadge kind={timerBadgeKind(game)} size={18} />
+              <TypeBadge kind={modeBadgeKind(game)} size={18} />
             </div>
-            <div style={{ textAlign: 'right', flex: 'none' }}>
-              <div style={{ fontSize: '11px', color: statusColor, letterSpacing: '0.1em', marginBottom: '2px' }}>
-                {isExpired ? '● ENDED' : '● LIVE'}
-              </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                ⏱ {formatTime(timeLeft)}
-              </div>
+            <div style={{ fontSize: '10px', marginTop: '2px' }}>
+              {game.host_username ? (
+                <a href={`/profile/${game.host_username}`}
+                  onClick={e => e.stopPropagation()}
+                  style={{ color: 'var(--text-muted)', textDecoration: 'none', letterSpacing: '0.05em' }}
+                  onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
+                  onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                >
+                  @{game.host_username}
+                </a>
+              ) : (
+                <span style={{ color: 'var(--text-muted)' }}>{game.host.slice(0,6)}...{game.host.slice(-4)}</span>
+              )}
+            </div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '11px', color: statusColor, letterSpacing: '0.1em', marginBottom: '2px' }}>
+              {isExpired ? '● ENDED' : '● LIVE'}
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+              ⏱ {formatTime(timeLeft)}
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
-          <span style={{ fontFamily: 'var(--font-display)', fontSize: '42px', color: 'var(--text-primary)', lineHeight: 1 }}>
-            {formatAmount(game.jackpot_claimed && game.final_jackpot != null ? game.final_jackpot : game.pool_balance)}
-          </span>
-          {sym && <span style={{ fontSize: '24px', color: 'var(--text-secondary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '50%' }}>{sym}</span>}
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: '42px', color: 'var(--text-primary)', marginBottom: '4px' }}>
+          {formatAmount(game.pool_balance)}
         </div>
-        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '20px', letterSpacing: '0.05em' }}>
-          {game.jackpot_claimed ? 'JACKPOT WON' : 'IN POOL'}
+        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px', letterSpacing: '0.05em' }}>
+          USDC IN POOL
+        </div>
+
+        <div style={{ marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>POOL GROWTH</span>
+            <span style={{ fontSize: '10px', color: statusColor, fontWeight: '700' }}>{poolPct}%</span>
+          </div>
+          <div style={{ height: '3px', background: 'var(--border)', position: 'relative' }}>
+            <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${Math.min(poolPct, 100)}%`, background: statusColor, transition: 'width 0.3s' }} />
+          </div>
         </div>
 
         <div className="grid-stats-4" style={{ gap: '8px' }}>
           {[
-            { label: 'MIN BET', value: formatCompact(game.min_bet), unit: sym },
+            { label: 'MIN BET', value: `$${formatAmount(game.min_bet)}` },
             { label: 'ROI', value: `${(game.roi_bps / 100).toFixed(0)}%` },
             { label: 'BETS', value: game.bet_count || '—' },
             { label: 'TIMER', value: parseInt(game.timer_mode) === 1 ? `+${Math.round(parseInt(game.time_increment) / 60)}m/bet` : `${Math.round(parseInt(game.timer_duration) / 60)}m reset` },
           ].map(stat => (
-            <div key={stat.label} style={{ background: 'var(--bg)', padding: '10px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', textAlign: 'center' }}>
-              <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--accent)' }}>{stat.value}</div>
-              {stat.unit && <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{stat.unit}</div>}
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em', marginTop: '4px' }}>{stat.label}</div>
+            <div key={stat.label} style={{ background: 'var(--bg)', padding: '10px', textAlign: 'center' }}>
+              <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--accent)', marginBottom: '2px' }}>{stat.value}</div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>{stat.label}</div>
             </div>
           ))}
-        </div>
         </div>
       </div>
   );
 }
 
 const TIMER_MODE_LABELS = { '': 'ANY', '0': 'FIXED', '1': 'CUMULATIVE', '2': 'RANDOM' };
-const SALVADOR_MODE_LABELS = { '': 'ANY', '0': 'VANILLA', '1': 'SALVADOR — FIXED', '2': 'SALVADOR — PROGRESSIVE', '3': 'SALVADOR — INSANITY' };
+const SALVADOR_MODE_LABELS = { '': 'ANY', '0': 'VANILLA', '1': 'SALVADOR — FIXED', '2': 'SALVADOR — PROGRESSIVE', '3': 'SALVADOR — RANDOM' };
 
 const inputStyle = {
   width: '100%',
@@ -168,8 +142,6 @@ const inputStyle = {
 
 export default function GamesPage() {
   const [games, setGames] = useState([]);
-  const [tokenInfoByMint, setTokenInfoByMint] = useState({});
-  const [filterTokens, setFilterTokens] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -187,7 +159,6 @@ export default function GamesPage() {
     max_min_bet: '',
     timer_mode: '',
     salvador_mode: '',
-    token: '',
   });
   const [appliedFilters, setAppliedFilters] = useState({});
 
@@ -199,31 +170,10 @@ export default function GamesPage() {
     return () => clearInterval(interval);
   }, [sort, tab, appliedFilters]);
 
-  // Whitelisted tokens for the token filter dropdown (from chain, cached).
-  useEffect(() => {
-    getSelectableTokens(rpcConnection).then(setFilterTokens).catch(() => {});
-  }, []);
-
   useEffect(() => {
     const interval = setInterval(() => setTick(t => t + 1), 1000);
     return () => clearInterval(interval);
   }, []);
-
-  // [v10] Resolve token symbol/decimals for each distinct mint in the current list (cached, proxy-safe).
-  useEffect(() => {
-    const mints = [...new Set(games.map(g => g.token_mint).filter(Boolean))];
-    const missing = mints.filter(m => !tokenInfoByMint[m]);
-    if (missing.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      const updates = {};
-      for (const m of missing) {
-        try { updates[m] = await getTokenInfo(rpcConnection, m); } catch (e) { /* skip */ }
-      }
-      if (!cancelled && Object.keys(updates).length) setTokenInfoByMint(prev => ({ ...prev, ...updates }));
-    })();
-    return () => { cancelled = true; };
-  }, [games]);
 
   function buildQuery(extraFilters = {}) {
     const f = { ...appliedFilters, ...extraFilters };
@@ -256,7 +206,6 @@ export default function GamesPage() {
       if (currentFilters.max_min_bet) params.set('max_min_bet', currentFilters.max_min_bet);
       if (currentFilters.timer_mode !== undefined && currentFilters.timer_mode !== '') params.set('timer_mode', currentFilters.timer_mode);
       if (currentFilters.salvador_mode !== undefined && currentFilters.salvador_mode !== '') params.set('salvador_mode', currentFilters.salvador_mode);
-      if (currentFilters.token) params.set('token', currentFilters.token);
 
       const res = await fetch(`${API_URL}/api/games?${params.toString()}`);
       const data = await res.json();
@@ -277,7 +226,7 @@ export default function GamesPage() {
   }
 
   function clearFilters() {
-    const empty = { name: '', min_pool: '', max_pool: '', min_min_bet: '', max_min_bet: '', timer_mode: '', salvador_mode: '', token: '' };
+    const empty = { name: '', min_pool: '', max_pool: '', min_min_bet: '', max_min_bet: '', timer_mode: '', salvador_mode: '' };
     setFilters(empty);
     setAppliedFilters({});
     setOffset(0);
@@ -444,20 +393,6 @@ export default function GamesPage() {
                 </select>
               </div>
 
-              <div>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em', marginBottom: '6px' }}>TOKEN</div>
-                <select
-                  value={filters.token}
-                  onChange={e => setFilters(f => ({ ...f, token: e.target.value }))}
-                  style={{ ...inputStyle, cursor: 'pointer' }}
-                >
-                  <option value="">ANY</option>
-                  {filterTokens.map(t => (
-                    <option key={t.mint.toBase58()} value={t.mint.toBase58()}>{t.symbol}</option>
-                  ))}
-                </select>
-              </div>
-
             </div>
 
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -511,7 +446,7 @@ export default function GamesPage() {
         ) : (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-              {games.map(game => <GameCard key={game.id} game={game} tokenInfo={tokenInfoByMint[game.token_mint]} />)}
+              {games.map(game => <GameCard key={game.id} game={game} />)}
             </div>
 
             {hasMore && (

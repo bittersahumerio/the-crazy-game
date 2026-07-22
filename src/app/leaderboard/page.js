@@ -21,13 +21,13 @@ function getWeekDates(weekStart, weekEnd) {
   return `${start} — ${end}`;
 }
 
-function getTimeLeft(weekEnd, now) {
-  const diff = new Date(weekEnd).getTime() - now;
-  if (diff <= 0) return 'Ending soon';
-  const d = Math.floor(diff / (1000 * 60 * 60 * 24));
-  const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-  const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-  return `${d}d ${h}h ${m}m left`;
+function getDaysLeft(weekEnd) {
+  const diff = new Date(weekEnd) - new Date();
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  if (days > 0) return `${days}d ${hours}h left`;
+  if (hours > 0) return `${hours}h left`;
+  return 'Ending soon';
 }
 
 function getTiers(payoutPotUsd) {
@@ -40,6 +40,10 @@ function getTiers(payoutPotUsd) {
           0.4, 0.4, 0.4, 0.4, 0.3, 0.3, 0.3, 0.3, 0.3, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2];
 }
 
+function formatSol(lamports) {
+  return (parseInt(lamports || 0) / 1_000_000_000).toFixed(3);
+}
+
 const MEDAL_COLORS = ['#FFD700', '#C0C0C0', '#CD7F32'];
 
 export default function LeaderboardPage() {
@@ -47,7 +51,6 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [usernames, setUsernames] = useState({});
   const [showTiers, setShowTiers] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
   const { publicKey } = useWallet();
 
   useEffect(() => {
@@ -56,19 +59,12 @@ export default function LeaderboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Live countdown tick (d:h:m display) — independent of the 30s data refresh.
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
   async function fetchLeaderboard() {
     try {
       const res = await fetch(`${API_URL}/api/leaderboard`);
       const json = await res.json();
       setData(json);
-      const allPlayers = [...(json.entries || []), ...((json.lastWeek && json.lastWeek.entries) || [])];
-      if (allPlayers.length) fetchUsernames(allPlayers);
+      if (json.entries) fetchUsernames(json.entries);
     } catch (e) {
       console.error(e);
     } finally {
@@ -92,35 +88,13 @@ export default function LeaderboardPage() {
     }
   }
 
-  const potAmount = parseInt(data?.week?.pot_amount || 0);
+  const potAmount = parseInt(data?.week?.pot_sol_amount || 0);
   const payoutPot = potAmount / 2;
-  const payoutPotUsd = payoutPot / 1_000_000;
-  const tiers = getTiers(payoutPotUsd);
-
-  // Tie-aware placements: players with equal Scovilles share a rank and split
-  // the combined prize for the slots they occupy (mirrors backend closeWeek).
-  const placements = (() => {
-    const e = data?.entries || [];
-    const out = new Array(e.length);
-    let i = 0;
-    while (i < e.length) {
-      let j = i;
-      while (j < e.length && e[j].fees_paid === e[i].fees_paid) j++;
-      const groupSize = j - i;
-      let groupPct = 0;
-      for (let pos = i; pos < j; pos++) groupPct += pos < tiers.length ? tiers[pos] : 0;
-      const rewardEach = groupPct > 0 ? (payoutPot * (groupPct / 100)) / groupSize / 1_000_000 : null;
-      for (let k = i; k < j; k++) out[k] = { rank: i + 1, reward: rewardEach };
-      i = j;
-    }
-    return out;
-  })();
-
+  const payoutPotSol = payoutPot / 1_000_000_000;
+  const tiers = getTiers(payoutPotSol * 150);
   const myWallet = publicKey?.toString();
   const myEntry = data?.entries?.find(e => e.player === myWallet);
-  const myIndex = myEntry ? data.entries.indexOf(myEntry) : -1;
-  const myRank = myIndex >= 0 ? placements[myIndex].rank : null;
-  const myReward = myIndex >= 0 ? placements[myIndex].reward : null;
+  const myRank = myEntry ? data.entries.indexOf(myEntry) + 1 : null;
 
   return (
     <>
@@ -130,8 +104,11 @@ export default function LeaderboardPage() {
         <h1 className="h-display-xl" style={{ fontFamily: 'var(--font-display)', marginBottom: '8px', color: 'var(--text-primary)', letterSpacing: '0.05em' }}>
           THE HEAT
         </h1>
-        <p style={{ color: 'var(--text-secondary)', marginBottom: '40px', fontSize: '14px' }}>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: '12px', fontSize: '14px' }}>
           Top players by Scovilles earned this week split the pot. 50% rolls over to next week — the pot never dies.
+        </p>
+        <p style={{ color: 'var(--text-muted)', marginBottom: '40px', fontSize: '12px' }}>
+          Every game counts — you earn Scovilles from the SOL value of the fees you pay, in any token.
         </p>
 
         {loading ? (
@@ -144,13 +121,13 @@ export default function LeaderboardPage() {
             <div className="grid-3-stack" style={{ gap: '1px', background: 'var(--border)', border: '1px solid var(--accent)', marginBottom: '24px' }}>
               <div style={{ background: 'var(--bg-card)', padding: '28px', textAlign: 'center' }}>
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: '52px', color: 'var(--accent)', marginBottom: '4px' }}>
-                  ${formatAmount(potAmount)}
+                  ◎{formatSol(potAmount)}
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '0.1em' }}>TOTAL POT</div>
               </div>
               <div style={{ background: 'var(--bg-card)', padding: '28px', textAlign: 'center' }}>
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: '52px', color: 'var(--accent)', marginBottom: '4px' }}>
-                  ${payoutPotUsd.toFixed(2)}
+                  ◎{payoutPotSol.toFixed(3)}
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '0.1em' }}>PAID OUT</div>
                 <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>top {tiers.length} players</div>
@@ -160,9 +137,9 @@ export default function LeaderboardPage() {
                   {data.week ? getWeekDates(data.week.week_start, data.week.week_end) : '—'}
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
-                  {data.week ? getTimeLeft(data.week.week_end, now) : ''}
+                  {data.week ? getDaysLeft(data.week.week_end) : ''}
                 </div>
-                {data.week?.rollover_amount > 0 && (
+                {false && data.week?.rollover_amount > 0 && (
                   <div style={{ marginTop: '6px', fontSize: '10px', color: 'var(--accent)' }}>
                     +${formatAmount(data.week.rollover_amount)} rollover
                   </div>
@@ -182,12 +159,12 @@ export default function LeaderboardPage() {
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>RANK</div>
                   </div>
                   <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontFamily: 'var(--font-display)', fontSize: '28px', color: 'var(--accent)' }}>{Math.floor(parseInt(myEntry.fees_paid) / 10000)}</div>
+                    <div style={{ fontFamily: 'var(--font-display)', fontSize: '28px', color: 'var(--accent)' }}>{Math.floor(parseInt(myEntry.fees_paid) / 100000)}</div>
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>SCOVILLES</div>
                   </div>
                   <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontFamily: 'var(--font-display)', fontSize: '28px', color: myReward != null ? 'var(--accent)' : 'var(--text-muted)' }}>
-                      {myReward != null ? `$${myReward.toFixed(2)}` : '—'}
+                    <div style={{ fontFamily: 'var(--font-display)', fontSize: '28px', color: myRank <= tiers.length ? 'var(--accent)' : 'var(--text-muted)' }}>
+                      {myRank <= tiers.length ? `◎${(payoutPot * tiers[myRank - 1] / 100 / 1_000_000_000).toFixed(3)}` : '—'}
                     </div>
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>EST. REWARD</div>
                   </div>
@@ -217,7 +194,7 @@ export default function LeaderboardPage() {
                     </span>
                     <span style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>{pct}%</span>
                     <span style={{ textAlign: 'right', color: 'var(--accent)', fontFamily: 'var(--font-display)', fontSize: '16px' }}>
-                      ${(payoutPot * pct / 100 / 1_000_000).toFixed(2)}
+                      ◎{(payoutPot * pct / 100 / 1_000_000_000).toFixed(3)}
                     </span>
                   </div>
                 ))}
@@ -243,9 +220,8 @@ export default function LeaderboardPage() {
               ) : (
                 data.entries.map((entry, i) => {
                   const isMe = entry.player === myWallet;
-                  const place = placements[i];
-                  const estReward = place.reward != null ? place.reward.toFixed(2) : null;
-                  const isPaid = place.reward != null;
+                  const isPaid = i < tiers.length;
+                  const estReward = isPaid ? (payoutPot * tiers[i] / 100 / 1_000_000_000).toFixed(3) : null;
                   return (
                     <div key={entry.player} className="lb-row" style={{
                       display: 'grid',
@@ -255,18 +231,18 @@ export default function LeaderboardPage() {
                       alignItems: 'center',
                       background: isMe ? 'var(--accent-dim)' : i < 3 ? 'rgba(255,255,255,0.02)' : 'transparent',
                     }}>
-                      <span style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: place.rank <= 3 ? MEDAL_COLORS[place.rank - 1] : 'var(--text-muted)' }}>
-                        {place.rank}
+                      <span style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: i < 3 ? MEDAL_COLORS[i] : 'var(--text-muted)' }}>
+                        {i + 1}
                       </span>
                       <Link href={usernames[entry.player] ? `/profile/${usernames[entry.player]}` : '#'} style={{ fontSize: '13px', color: isMe ? 'var(--accent)' : 'var(--text-primary)', textDecoration: 'none' }}>
                         {usernames[entry.player] ? `@${usernames[entry.player]}` : shortAddress(entry.player)}
                         {isMe && <span style={{ fontSize: '10px', marginLeft: '8px', color: 'var(--accent)' }}>YOU</span>}
                       </Link>
                       <span style={{ fontSize: '13px', textAlign: 'right', color: 'var(--accent)' }}>
-                        {Math.floor(parseInt(entry.fees_paid) / 10000)}
+                        {Math.floor(parseInt(entry.fees_paid) / 100000)}
                       </span>
                       <span style={{ fontSize: '13px', textAlign: 'right', color: isPaid ? 'var(--accent)' : 'var(--text-muted)' }}>
-                        {estReward ? `$${estReward}` : '—'}
+                        {estReward ? `◎${estReward}` : '—'}
                       </span>
                     </div>
                   );
@@ -275,46 +251,12 @@ export default function LeaderboardPage() {
               </div>
             </div>
 
-            {/* Last week's final results */}
-            {data.lastWeek?.entries?.length > 0 && (
-              <div style={{ marginTop: '32px', border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
-                <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                  <div style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: 'var(--text-primary)', letterSpacing: '0.05em' }}>LAST WEEK</div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                    {getWeekDates(data.lastWeek.week.week_start, data.lastWeek.week.week_end)} · ${(data.lastWeek.entries.reduce((s, e) => s + (parseInt(e.reward) || 0), 0) / 1_000_000).toFixed(2)} paid out
-                  </div>
-                </div>
-                <div className="scroll-x">
-                  <div className="lb-row" style={{ display: 'grid', gridTemplateColumns: '60px 1fr 140px 120px', padding: '12px 24px', borderBottom: '1px solid var(--border)', fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>
-                    <span>RANK</span>
-                    <span>PLAYER</span>
-                    <span style={{ textAlign: 'right' }}>SCOVILLES</span>
-                    <span style={{ textAlign: 'right' }}>WON</span>
-                  </div>
-                  {data.lastWeek.entries.map((entry) => {
-                    const r = parseInt(entry.rank);
-                    const won = (parseInt(entry.reward) || 0) / 1_000_000;
-                    return (
-                      <div key={entry.player} className="lb-row" style={{ display: 'grid', gridTemplateColumns: '60px 1fr 140px 120px', padding: '14px 24px', borderBottom: '1px solid var(--border)', alignItems: 'center', background: r <= 3 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
-                        <span style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: r <= 3 ? MEDAL_COLORS[r - 1] : 'var(--text-muted)' }}>{r}</span>
-                        <Link href={usernames[entry.player] ? `/profile/${usernames[entry.player]}` : '#'} style={{ fontSize: '13px', color: 'var(--text-primary)', textDecoration: 'none' }}>
-                          {usernames[entry.player] ? `@${usernames[entry.player]}` : shortAddress(entry.player)}
-                        </Link>
-                        <span style={{ fontSize: '13px', textAlign: 'right', color: 'var(--accent)' }}>{Math.floor(parseInt(entry.fees_paid) / 10000)}</span>
-                        <span style={{ fontSize: '13px', textAlign: 'right', color: won > 0 ? 'var(--accent)' : 'var(--text-muted)' }}>{won > 0 ? `$${won.toFixed(2)}` : '—'}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
             {/* How it works */}
             <div style={{ marginTop: '32px', border: '1px solid var(--border)', padding: '24px', background: 'var(--bg-card)', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.8 }}>
               <div style={{ color: 'var(--text-primary)', fontWeight: '700', marginBottom: '8px', letterSpacing: '0.05em' }}>HOW THE HEAT WORKS</div>
-              Every fee you pay earns you Scovilles — 1 Scoville per $0.01 in fees. At the end of each week,
+              Every fee you pay earns you Scovilles — 1 Scoville per 0.0001 SOL in fees. At the end of each week,
               the top players split 50% of the pot based on their rank. The other 50% rolls over to the next week,
-              so the pot keeps growing. Rewards are paid in USDC directly to your wallet.
+              so the pot keeps growing. Rewards are paid in SOL directly to your wallet.
             </div>
           </>
         )}

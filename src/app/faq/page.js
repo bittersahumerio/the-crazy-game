@@ -28,16 +28,79 @@ const faqs = [
     a: 'Vanilla mode resets the timer to its full duration with every new bet. Cumulative mode starts with a base timer and adds a fixed increment with each bet — the timer grows over time. The host chooses the mode when creating the game.',
   },
   {
+    q: 'What is Salvador Mode?',
+    a: 'In a normal (Vanilla) game, only the last bettor standing when the timer expires wins. Salvador mode adds a second way to earn: a bounty for saving another player. When your bet pushes an earlier bet across its ROI target, so that player can cash out at their target, you are the one who got them there, and you collect a salvation bounty paid as a percentage of the current pool. The host picks one of three Salvador flavors: FIXED (a constant %), PROGRESSIVE (the bounty grows with each save, up to a cap), or INSANITY (each save rolls a random tier). The normal last-bettor-wins jackpot still applies on top.',
+  },
+  {
+    q: 'What is Salvador Insanity?',
+    a: (
+      <>
+        <p style={{ margin: '0 0 12px' }}>
+          Insanity is the wildest Salvador flavor. Instead of a fixed or growing bounty, every save rolls a provably-fair, on-chain (VRF) tier. Most saves pay a small slice of the pool, but a save can rarely hit a big one, up to half the pool. Insanity games need at least a $50 pool for the roll to be enabled.
+        </p>
+        <table style={{ borderCollapse: 'collapse', width: '100%', maxWidth: '340px', fontSize: '13px' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontWeight: 500 }}>Chance</th>
+              <th style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontWeight: 500 }}>Bounty (of pool)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[['50%', '0.2%'], ['30%', '0.5%'], ['15%', '1.5%'], ['4.9%', '10%'], ['0.1%', '50%']].map(([chance, bounty]) => (
+              <tr key={chance}>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{chance}</td>
+                <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)', color: 'var(--accent)', fontFamily: 'var(--font-display)' }}>{bounty}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </>
+    ),
+  },
+  {
     q: 'What fees are charged?',
-    a: 'The platform charges a fee of 3-5% depending on the game, plus a host fee of 1-5% set by the game host. These fees are deducted from each bet. A portion of platform fees funds the weekly Heat pot.',
+    a: 'The platform fee depends on which token the game is played in: 3% for USDC and other curated tokens, and 5% for any other token a host brings themselves. Unproven tokens carry a higher fee because platform fees are collected in that game’s own token — if it loses value, so do the fees we hold. On top of that, the host sets their own fee of 1-5%. Both are deducted from each bet, and a portion of the platform fee funds the weekly Heat pot.',
+  },
+  {
+    q: 'Why does placing a bet cost me a little SOL?',
+    a: (
+      <div>
+        <p style={{ marginBottom: '10px' }}>
+          Placing a bet costs roughly <strong>0.005 SOL</strong> up front — but most of that is a refundable
+          deposit, not a fee. Solana charges rent to create accounts, and your bet needs two of them:
+        </p>
+        <ul style={{ margin: '0 0 10px 18px', lineHeight: 1.8 }}>
+          <li>
+            <strong>~0.002 SOL — escrow account.</strong> Holds your bet until it is confirmed into the game.
+            Refunded automatically, within seconds, the moment your bet is processed.
+          </li>
+          <li>
+            <strong>~0.0024 SOL — your bet account.</strong> Tracks your position and ROI progress. Refunded when
+            that account is closed: automatically when you withdraw your winnings, or with one click from the
+            &quot;Reclaimable rent&quot; panel on your profile once the game has finished.
+          </li>
+          <li>
+            <strong>~0.0004 SOL — Insanity games only.</strong> Pays for the on-chain random roll (VRF) that
+            decides Salvador bounties. This one is not refundable.
+          </li>
+          <li>
+            <strong>~0.000005 SOL — the standard Solana network fee.</strong> Not refundable.
+          </li>
+        </ul>
+        <p>
+          So in a normal game you get essentially all of it back. In an Insanity game you are out about
+          0.0004 SOL per bet, which is what pays for the randomness.
+        </p>
+      </div>
+    ),
   },
   {
     q: 'What are Seeds?',
-    a: 'Seeds are airdrop points earned by playing the game. You earn Seeds proportional to the platform fees you pay. Seeds will be used for a future token airdrop.',
+    a: 'Seeds are airdrop points earned by playing the game. You earn Seeds proportional to the platform fees you pay, and they will count toward a future token airdrop. For now, only games played in USDC earn Seeds — support for other tokens is coming.',
   },
   {
     q: 'What is the weekly Heat?',
-    a: 'Every week, a pot is funded by a portion of all platform fees. Players earn points equal to the fees they pay. At the end of the week, the top players by points share the pot proportionally. The Heat resets each week.',
+    a: 'Every week, a pot is funded by a portion of platform fees. Players earn Scovilles based on the SOL value of the fees they pay (1 Scoville per 0.0001 SOL), and the top players by Scovilles split the pot at the end of the week — 50% rolls over into the next week, so the pot never dies. Fees paid in any token count: they are converted to SOL, so every game feeds the Heat.',
   },
   {
     q: 'Is the game provably fair?',
@@ -49,7 +112,7 @@ const faqs = [
   },
   {
     q: 'What wallets are supported?',
-    a: 'Any Solana wallet that supports dApps is compatible, including Phantom, Solflare, and Backpack. Currently the game uses USDC on Solana.',
+    a: 'Any Solana wallet that supports dApps is compatible, including Phantom, Solflare, and Backpack. Games can be played in USDC or other whitelisted tokens (such as GRID), chosen by the host when they create the game.',
   },
 ];
 

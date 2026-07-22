@@ -7,6 +7,14 @@ export const alt = 'Win on The Crazy Game';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
+function fmtWin(baseUnits, data) {
+  const dec = Number.isInteger(data && data.decimals) ? data.decimals : 6;
+  const v = Number(baseUnits) / Math.pow(10, dec);
+  if (data && data.token_usd) return '$' + v.toFixed(2);
+  const dp = v >= 1000 ? 2 : v >= 1 ? 3 : 4;
+  return v.toFixed(dp) + ' ' + ((data && data.symbol) || '');
+}
+
 async function fetchWin(gameNumber) {
   try {
     const r = await fetch(API_URL + '/api/wins/' + gameNumber, { cache: 'no-store' });
@@ -37,7 +45,7 @@ export default async function Image({ params }) {
     );
   }
 
-  const usd = (Number(data.jackpot_amount) / 1_000_000).toFixed(2);
+  const usd = fmtWin(data.jackpot_amount, data);
   const pnl = Number(data.pnl_percent).toLocaleString('en-US', { maximumFractionDigits: 1 });
   const winnerLabel = data.winner_username ? '@' + data.winner_username + ' WON' : 'WINNER';
 
@@ -76,7 +84,7 @@ export default async function Image({ params }) {
           fontSize: 140, color: '#00ff88', lineHeight: 1.1, fontWeight: 800,
           letterSpacing: -4, marginBottom: 60, display: 'flex',
         }}>
-          ${usd}
+          {usd}
         </div>
 
         {/* PnL */}

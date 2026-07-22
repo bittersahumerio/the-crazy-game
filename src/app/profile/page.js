@@ -1,13 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { useWallet, useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
+import { PublicKey, Transaction } from '@solana/web3.js';
+import { getAssociatedTokenAddress, createAssociatedTokenAccountIdempotentInstruction, createCloseAccountInstruction } from '@solana/spl-token';
 import dynamic from 'next/dynamic';
 import ShareWinButton from '@/components/ShareWinButton';
 import bs58 from 'bs58';
 import Navbar from '@/components/Navbar';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
+import { getTokenInfo, getProgram, getBetPda, getEscrowPda, PROGRAM_ID, WSOL_MINT } from '@/lib/program';
 
 const WalletMultiButton = dynamic(
   () => import('@solana/wallet-adapter-react-ui').then(m => m.WalletMultiButton),
@@ -36,6 +39,12 @@ function StatBox({ label, value, sublabel }) {
 
 export default function ProfilePage() {
   const { publicKey, connected, signMessage } = useWallet();
+  const anchorWallet = useAnchorWallet();
+  const [pendingBets, setPendingBets] = useState([]);
+  const [reclaiming, setReclaiming] = useState(null); // pubkey currently being reclaimed
+  // [bet-close] Finished-game bets whose ~0.0024 SOL of account rent the player can reclaim.
+  const [closeableBets, setCloseableBets] = useState([]);
+  const [reclaimingRent, setReclaimingRent] = useState(false);
   const [bets, setBets] = useState([]);
   const [betsTotal, setBetsTotal] = useState(0);
   const [betsOffset, setBetsOffset] = useState(0);
@@ -59,14 +68,38 @@ export default function ProfilePage() {
   const [seeds, setSeeds] = useState(0);
   const [scovilles, setScovilles] = useState(0);
   const [heatRank, setHeatRank] = useState(null);
+  const [tokenInfoByMint, setTokenInfoByMint] = useState({});
 
   useEffect(() => {
     if (connected && publicKey) {
       fetchProfile();
       fetchActiveBets();
       fetchPoints();
+      fetchPendingBets();
+      fetchCloseableBets();
     }
   }, [connected, publicKey]);
+
+  // Resolve token symbol/decimals for every distinct mint across the user's bets / games / wins.
+  useEffect(() => {
+    if (!connection) return;
+    const mints = [...new Set([
+      ...activeBets.map(b => b.token_mint),
+      ...bets.map(b => b.token_mint),
+      ...gamesHosted.map(g => g.token_mint),
+      ...wins.map(w => w.token_mint),
+      ...pendingBets.map(b => b.tokenMint),
+    ].filter(Boolean))];
+    const missing = mints.filter(m => !tokenInfoByMint[m]);
+    if (!missing.length) return;
+    let cancelled = false;
+    (async () => {
+      const updates = {};
+      for (const m of missing) { try { updates[m] = await getTokenInfo(connection, m); } catch (e) {} }
+      if (!cancelled && Object.keys(updates).length) setTokenInfoByMint(prev => ({ ...prev, ...updates }));
+    })();
+    return () => { cancelled = true; };
+  }, [activeBets, bets, gamesHosted, wins, pendingBets, connection]);
 
   async function fetchPoints() {
     try {
@@ -83,6 +116,8 @@ export default function ProfilePage() {
       setSeeds(seedsData.seeds || 0);
       setScovilles(scovillesData.scovilles || 0);
       setHeatRank(scovillesData.rank || null);
+      const winsData = await winsRes.json();
+      setWins(winsData.wins || []);
     } catch (e) {
       console.error(e);
     }
@@ -139,6 +174,164 @@ export default function ProfilePage() {
       setActiveBets(data.bets || []);
     } catch (e) {
       console.error(e);
+    }
+  }
+
+  // [reclaim] PENDING bets are ones that were queued on-chain but never finalized by the operator (a
+  // dropped process_bet) — their deposit is still locked in the bet's escrow. This finds them via the
+  // backend (the browser RPC proxy can't getProgramAccounts) so the owner can refund themselves.
+  async function fetchPendingBets() {
+    try {
+      const res = await fetch(`${API_URL}/api/players/${publicKey.toString()}/pending-bets`);
+      const data = await res.json();
+      setPendingBets(data.bets || []);
+    } catch (e) {
+      console.error('fetchPendingBets failed:', e);
+    }
+  }
+
+  // Build, sign, send, then HTTP-POLL confirm (the frontend RPC proxy has no WebSocket, so anchor's
+  // .rpc() false-fails). Same pattern as the game page's bet/withdraw/claim.
+  async function sendAndConfirmIxs(ixs) {
+    const tx = new Transaction();
+    ixs.forEach(ix => tx.add(ix));
+    tx.feePayer = publicKey;
+    tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+    const signed = await anchorWallet.signTransaction(tx);
+    const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: true, maxRetries: 5 });
+    const tid = toast.loading('Confirming refund on-chain…');
+    try {
+      const deadline = Date.now() + 60000;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2000));
+        const st = (await connection.getSignatureStatuses([sig])).value[0];
+        if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) {
+          if (st.err) throw new Error('tx failed: ' + JSON.stringify(st.err));
+          return sig;
+        }
+      }
+      throw new Error('confirmation timeout — it may still have landed; refresh to check');
+    } finally {
+      toast.dismiss(tid);
+    }
+  }
+
+  // [reclaim] Refund one stuck bet via cancel_pending_bet. Returns the deposit from escrow to the
+  // player's token account. Player-signed; only works while the bet is still is_pending.
+  async function reclaimBet(pb) {
+    if (!connected || !publicKey || !anchorWallet) return toast.error('Connect wallet first');
+    if (!pb.gameHost || !pb.gameName || !pb.tokenMint) return toast.error('Missing game info — refresh and try again');
+    setReclaiming(pb.pubkey);
+    try {
+      const program = getProgram(anchorWallet, connection);
+      const gamePda = new PublicKey(pb.game);
+      const hostPk = new PublicKey(pb.gameHost);
+      const mintPk = new PublicKey(pb.tokenMint);
+      const ti = await getTokenInfo(connection, mintPk);
+      // Re-derive the game PDA to get its canonical bump (an arg to cancel_pending_bet), and sanity-check
+      // it matches the bet's stored game pubkey before signing.
+      const [derivedGamePda, gameBump] = PublicKey.findProgramAddressSync(
+        [Buffer.from('game'), hostPk.toBuffer(), Buffer.from(pb.gameName)], PROGRAM_ID
+      );
+      if (derivedGamePda.toBase58() !== gamePda.toBase58()) throw new Error('game PDA mismatch');
+      const betPda = getBetPda(gamePda, pb.betSeed);
+      const escrowPda = getEscrowPda(gamePda, pb.betSeed);
+      const playerTokenAccount = await getAssociatedTokenAddress(mintPk, publicKey, false, ti.tokenProgram);
+      const ix = await program.methods
+        .cancelPendingBet(hostPk, pb.gameName, gameBump)
+        .accounts({
+          game: gamePda,
+          bet: betPda,
+          escrow: escrowPda,
+          player: publicKey,
+          playerTokenAccount,
+          tokenMint: mintPk,
+          tokenProgram: ti.tokenProgram,
+        })
+        .instruction();
+      // [SOL games] the refund lands as wSOL, so for a SOL game ensure the wSOL ATA exists before the
+      // transfer, then close it after to unwrap the refund back to native SOL. Without this the transfer
+      // targets a nonexistent ATA and the whole tx fails (Phantom sim error, then on-chain fail) — the
+      // same wrap/unwrap the game page's withdraw/claim already do.
+      const isWsol = mintPk.equals(WSOL_MINT);
+      const ixs = [];
+      if (isWsol) ixs.push(createAssociatedTokenAccountIdempotentInstruction(publicKey, playerTokenAccount, publicKey, WSOL_MINT, ti.tokenProgram));
+      ixs.push(ix);
+      if (isWsol) ixs.push(createCloseAccountInstruction(playerTokenAccount, publicKey, publicKey, [], ti.tokenProgram));
+      await sendAndConfirmIxs(ixs);
+      toast.success('Refunded! ✓');
+      setPendingBets(prev => prev.filter(b => b.pubkey !== pb.pubkey));
+      setTimeout(fetchPendingBets, 4000);
+    } catch (e) {
+      console.error('reclaim failed:', e);
+      toast.error(e?.message?.includes('mismatch') ? 'Could not verify this bet' : 'Refund failed — please try again');
+    } finally {
+      setReclaiming(null);
+    }
+  }
+
+  // [bet-close] Bets in FINISHED games whose ~0.0024 SOL of account rent is reclaimable. close_bet sends that
+  // rent straight back to bet.player (contract-enforced). The browser can't getProgramAccounts, so the backend
+  // enumerates + filters (never a pending bet, never a reserved-but-unwithdrawn one, never an orphaned game).
+  async function fetchCloseableBets() {
+    try {
+      const res = await fetch(`${API_URL}/api/players/${publicKey.toString()}/closeable-bets`);
+      const data = await res.json();
+      setCloseableBets(data.bets || []);
+    } catch (e) {
+      console.error('fetchCloseableBets failed:', e);
+    }
+  }
+
+  // Close them all. Multiple close_bet ixs for the same player share their accounts, so ~15 fit in one tx, and
+  // signAllTransactions gets the whole set through ONE wallet approval — a heavy bettor with hundreds of bets
+  // reclaims everything with a single click and a single prompt.
+  async function reclaimAllRent() {
+    if (!connected || !publicKey || !anchorWallet) return toast.error('Connect wallet first');
+    if (!closeableBets.length) return;
+    setReclaimingRent(true);
+    const tid = toast.loading(`Reclaiming rent from ${closeableBets.length} bet${closeableBets.length > 1 ? 's' : ''}…`);
+    try {
+      const program = getProgram(anchorWallet, connection);
+      const BATCH = 15;
+      const { blockhash } = await connection.getLatestBlockhash('confirmed');
+      const txs = [];
+      for (let i = 0; i < closeableBets.length; i += BATCH) {
+        const tx = new Transaction();
+        for (const b of closeableBets.slice(i, i + BATCH)) {
+          tx.add(await program.methods
+            .closeBet()
+            .accounts({ game: new PublicKey(b.game), bet: new PublicKey(b.pubkey), recipient: publicKey, caller: publicKey })
+            .instruction());
+        }
+        tx.feePayer = publicKey;
+        tx.recentBlockhash = blockhash;
+        txs.push(tx);
+      }
+      const signed = await anchorWallet.signAllTransactions(txs); // one approval for the whole set
+      const sigs = [];
+      for (const s of signed) sigs.push(await connection.sendRawTransaction(s.serialize(), { skipPreflight: true, maxRetries: 5 }));
+      // HTTP-poll confirm (the frontend RPC proxy has no WebSocket).
+      const deadline = Date.now() + 90000;
+      const pendingSigs = new Set(sigs);
+      while (pendingSigs.size && Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2000));
+        const arr = [...pendingSigs];
+        const sts = (await connection.getSignatureStatuses(arr)).value;
+        arr.forEach((sig, i) => {
+          const st = sts[i];
+          if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) pendingSigs.delete(sig);
+        });
+      }
+      toast.success('Rent reclaimed! ✓');
+      setCloseableBets([]);
+      setTimeout(fetchCloseableBets, 4000);
+    } catch (e) {
+      console.error('reclaim rent failed:', e);
+      toast.error('Could not reclaim rent — please try again');
+    } finally {
+      toast.dismiss(tid);
+      setReclaimingRent(false);
     }
   }
 
@@ -228,6 +421,16 @@ export default function ProfilePage() {
     return (parseInt(amount) / 1_000_000).toFixed(2);
   }
 
+  // Token-aware amount: uses the game's mint for decimals + symbol (falls back to USDC).
+  function fmtTok(amount, mint) {
+    const ti = mint ? tokenInfoByMint[mint] : null;
+    const dec = ti ? 10 ** ti.decimals : 1_000_000;
+    const sym = ti?.symbol ?? 'USDC';
+    const v = parseInt(amount) / dec;
+    const mx = dec >= 1e8 ? (v > 0 && v < 1 ? 5 : 3) : 2;  // [SOL games] more precision for SOL
+    return `${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: Math.max(2, mx) })} ${sym}`;
+  }
+
   function shortAddress(addr) {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   }
@@ -297,7 +500,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Stats */}
-        <div className="grid-stats-4" style={{ gap: '16px', marginBottom: '32px' }}>
+        <div className="grid-stats-4" style={{ gap: '16px', marginBottom: '12px' }}>
           <StatBox label="TOTAL BETS" value={stats?.total_bets || 0} />
           <StatBox label="GAMES HOSTED" value={gamesHosted.length} />
           <StatBox
@@ -310,6 +513,9 @@ export default function ProfilePage() {
             value={formatPoints(seeds)}
             sublabel="LIFETIME · FUTURE AIRDROP"
           />
+        </div>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '32px' }}>
+          You earn Heat and Seeds from the fees you pay in any token (Heat from the SOL value of your fees, Seeds from the USD value).
         </div>
 
         {/* Username + Socials */}
@@ -373,6 +579,79 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        {/* Stuck bets — reclaim */}
+        {pendingBets.length > 0 && (
+          <div style={{ border: '1px solid #f0c040', background: 'rgba(240,192,64,0.06)', padding: '20px 24px', marginBottom: '32px' }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '18px', color: '#f0c040', marginBottom: '6px' }}>
+              ⚠ STUCK BETS ({pendingBets.length})
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.5 }}>
+              These bets were queued on-chain but never confirmed into their game (a network drop). Your deposit is
+              safe, held in escrow. Reclaim it below to refund yourself — you sign one transaction and the tokens
+              return to your wallet.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {pendingBets.map((pb) => (
+                <div key={pb.pubkey} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', background: 'var(--bg-card)', border: '1px solid var(--border)', padding: '12px 16px' }}>
+                  <div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>
+                      {pb.gameName || 'Unknown game'}
+                      {pb.gameNumber != null && (
+                        <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: '8px' }}>#{String(pb.gameNumber).padStart(4, '0')}</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '15px', color: '#f0c040', marginTop: '2px' }}>{fmtTok(pb.amount, pb.tokenMint)}</div>
+                  </div>
+                  <button
+                    onClick={() => reclaimBet(pb)}
+                    disabled={reclaiming === pb.pubkey || !pb.gameHost}
+                    style={{
+                      background: reclaiming === pb.pubkey ? 'transparent' : '#f0c040', color: reclaiming === pb.pubkey ? '#f0c040' : '#000',
+                      border: '1px solid #f0c040', padding: '10px 20px', fontWeight: '700', fontSize: '12px', letterSpacing: '0.05em',
+                      cursor: reclaiming === pb.pubkey || !pb.gameHost ? 'not-allowed' : 'pointer', opacity: !pb.gameHost ? 0.5 : 1, whiteSpace: 'nowrap',
+                    }}>
+                    {reclaiming === pb.pubkey ? 'REFUNDING…' : 'RECLAIM'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Reclaimable rent — finished-game bets */}
+        {closeableBets.length > 0 && (
+          <div style={{ border: '1px solid var(--accent)', background: 'var(--accent-dim)', padding: '20px 24px', marginBottom: '32px' }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '18px', color: 'var(--accent)', marginBottom: '6px' }}>
+              RECLAIMABLE RENT
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.5 }}>
+              Every bet you place creates a small on-chain account, funded by ~0.0024 SOL of your own SOL. Those
+              games have finished, so you can close {closeableBets.length === 1 ? 'that account' : 'those accounts'} and
+              take the SOL back. One click, one signature — it all returns to your wallet.
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '28px', color: 'var(--accent)' }}>
+                  ~{(closeableBets.length * 0.0024).toFixed(4)} SOL
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.1em' }}>
+                  ACROSS {closeableBets.length} FINISHED BET{closeableBets.length > 1 ? 'S' : ''}
+                </div>
+              </div>
+              <button
+                onClick={reclaimAllRent}
+                disabled={reclaimingRent}
+                style={{
+                  background: reclaimingRent ? 'transparent' : 'var(--accent)', color: reclaimingRent ? 'var(--accent)' : '#000',
+                  border: '1px solid var(--accent)', padding: '12px 24px', fontWeight: '700', fontSize: '12px',
+                  letterSpacing: '0.05em', cursor: reclaimingRent ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
+                }}>
+                {reclaimingRent ? 'RECLAIMING…' : 'RECLAIM ALL'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: '24px' }}>
           {[
@@ -421,11 +700,11 @@ export default function ProfilePage() {
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>${formatAmount(bet.amount)}</div>
+                          <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{fmtTok(bet.amount, bet.token_mint)}</div>
                           <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>WAGERED</div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>${formatAmount(bet.roi_target)}</div>
+                          <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{fmtTok(bet.roi_target, bet.token_mint)}</div>
                           <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>ROI TARGET</div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
@@ -472,8 +751,8 @@ export default function ProfilePage() {
                       </Link>
                       <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: '8px' }}>#{bet.bet_index}</span>
                     </div>
-                    <div style={{ textAlign: 'right' }}>${formatAmount(bet.amount)}</div>
-                    <div style={{ textAlign: 'right' }}>${formatAmount(bet.roi_target)}</div>
+                    <div style={{ textAlign: 'right' }}>{fmtTok(bet.amount, bet.token_mint)}</div>
+                    <div style={{ textAlign: 'right' }}>{fmtTok(bet.roi_target, bet.token_mint)}</div>
                     <div style={{ textAlign: 'right', fontSize: '11px', color: 'var(--text-muted)' }}>{formatDate(bet.placed_at)}</div>
                     <div style={{ textAlign: 'right', fontSize: '11px', color: bet.withdrawn ? 'var(--text-muted)' : bet.reserved ? 'var(--accent)' : 'var(--text-secondary)' }}>
                       {bet.withdrawn ? 'WITHDRAWN' : bet.reserved ? 'READY' : 'ACTIVE'}
@@ -513,7 +792,7 @@ export default function ProfilePage() {
                         {game.name || `#${String(game.game_number).padStart(4, '0')}`}
                         <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: '8px' }}>#{String(game.game_number).padStart(4, '0')}</span>
                       </Link>
-                      <div style={{ textAlign: 'right' }}>${formatAmount(game.pool_balance)}</div>
+                      <div style={{ textAlign: 'right' }}>{fmtTok(game.pool_balance, game.token_mint)}</div>
                       <div style={{ textAlign: 'right' }}>{(game.roi_bps / 100).toFixed(0)}%</div>
                       <div style={{ textAlign: 'right' }}>{game.bet_count}</div>
                       <div style={{ textAlign: 'right', fontSize: '11px', color: isLive ? 'var(--accent)' : 'var(--text-muted)' }}>
@@ -538,8 +817,8 @@ export default function ProfilePage() {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {wins.map((w, i) => {
-                  const usd = (Number(w.jackpot_amount) / 1_000_000).toFixed(2);
-                  const lastBetUsd = (Number(w.last_bet_amount) / 1_000_000).toFixed(2);
+                  const usd = fmtTok(w.jackpot_amount, w.token_mint);
+                  const lastBetUsd = fmtTok(w.last_bet_amount, w.token_mint);
                   const pnl = Number(w.pnl_percent).toLocaleString('en-US', { maximumFractionDigits: 1 });
                   return (
                     <div key={w.game_number} style={{
@@ -555,14 +834,14 @@ export default function ProfilePage() {
                             {w.game_name} <span style={{ color: 'var(--text-muted)' }}>#{String(w.game_number).padStart(4, '0')}</span>
                           </div>
                           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                            ${lastBetUsd} bet → ${usd} jackpot
+                            {lastBetUsd} bet → {usd} jackpot
                           </div>
                         </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
                         <div style={{ textAlign: 'right' }}>
                           <div style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: 'var(--accent)', lineHeight: 1 }}>
-                            ${usd}
+                            {usd}
                           </div>
                           <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                             {pnl}% PnL
@@ -597,7 +876,7 @@ export default function ProfilePage() {
                 </button>
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-                Earn 20% of every fee paid by players you refer — in USDC and Seeds.
+                Earn 20% of every fee paid by players you refer — in SOL and Seeds.
               </div>
             </div>
             {/* Earnings */}
@@ -607,6 +886,8 @@ export default function ProfilePage() {
                 ['TOTAL EARNED USDC', `$${((parseInt(referralData?.balance?.total_earned_usdc) || 0) / 1_000_000).toFixed(2)}`],
                 ['PENDING SEEDS', parseFloat(referralData?.balance?.pending_seeds || 0).toFixed(1)],
                 ['TOTAL SEEDS EARNED', parseFloat(referralData?.balance?.total_earned_seeds || 0).toFixed(1)],
+                ['PENDING SOL', `${((parseFloat(referralData?.balance?.pending_sol) || 0) / 1e9).toFixed(4)} SOL`],
+                ['TOTAL EARNED SOL', `${((parseFloat(referralData?.balance?.total_earned_sol) || 0) / 1e9).toFixed(4)} SOL`],
               ].map(([label, value]) => (
                 <div key={label} style={{ border: '1px solid var(--border)', padding: '16px', textAlign: 'center' }}>
                   <div style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: 'var(--accent)', marginBottom: '4px' }}>{value}</div>
@@ -614,6 +895,30 @@ export default function ProfilePage() {
                 </div>
               ))}
             </div>
+            {/* Claim SOL button */}
+            {Math.floor(parseFloat(referralData?.balance?.pending_sol) || 0) >= 5000000 && (
+              <div style={{ marginBottom: '24px', textAlign: 'center' }}>
+                <button onClick={async () => {
+                  try {
+                    const pending = Math.floor(parseFloat(referralData?.balance?.pending_sol) || 0);
+                    const { message, signature } = await signWithNonce('referral_claim_sol', { Amount: pending });
+                    const res = await fetch(`${API_URL}/api/users/referral/claim-sol`, {
+                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ wallet: publicKey.toString(), signature, message }),
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                      toast.success(`Claimed ${(data.amount / 1e9).toFixed(4)} SOL!`);
+                      const r = await fetch(`${API_URL}/api/users/${publicKey.toString()}/referrals`);
+                      setReferralData(await r.json());
+                    } else { toast.error(data.error || 'Claim failed'); }
+                  } catch (e) { toast.error('Claim failed'); }
+                }} style={{ background: 'var(--accent)', color: '#000', border: 'none', padding: '12px 32px', cursor: 'pointer', fontFamily: 'var(--font-display)', fontSize: '18px', letterSpacing: '0.05em' }}>
+                  CLAIM {((Math.floor(parseFloat(referralData?.balance?.pending_sol) || 0)) / 1e9).toFixed(4)} SOL
+                </button>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>Minimum claim: 0.005 SOL</div>
+              </div>
+            )}
             {/* Claim button */}
             {parseInt(referralData?.balance?.pending_usdc) >= 1000000 && (
               <div style={{ marginBottom: '24px', textAlign: 'center' }}>

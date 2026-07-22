@@ -15,6 +15,7 @@ const TYPE_BADGES = {
   mode_vanilla:     { letter: 'V', label: 'Vanilla',             tip: 'Vanilla — last bettor when the timer expires wins the pool.' },
   mode_salvador:    { letter: 'S', label: 'Salvador (Fixed)',    tip: 'Salvador (Fixed) — a fixed % of the pool is paid out when one player saves another (their bet pushes the previous bettor past ROI).' },
   mode_progressive: { letter: 'P', label: 'Salvador (Progressive)', tip: 'Salvador (Progressive) — salvation reward grows by a step % with each save, up to a cap.' },
+  mode_random:      { letter: 'I', label: 'Salvador (Insanity)',     tip: 'Salvador (Insanity) — each save rolls a provably-fair (VRF) tier: usually small (0.2-1.5% of the pool), rarely a 10% or a 50% jackpot.' },
 };
 
 export function timerBadgeKind(game) {
@@ -28,6 +29,7 @@ export function modeBadgeKind(game) {
   const m = parseInt(game.salvador_mode || 0);
   if (m === 1) return 'mode_salvador';
   if (m === 2) return 'mode_progressive';
+  if (m === 3) return 'mode_random';
   return 'mode_vanilla';
 }
 

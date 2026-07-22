@@ -4,6 +4,14 @@ import Navbar from '@/components/Navbar';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://thecrazygame.fun';
 
+function fmtWin(baseUnits, data) {
+  const dec = Number.isInteger(data && data.decimals) ? data.decimals : 6;
+  const v = Number(baseUnits) / Math.pow(10, dec);
+  if (data && data.token_usd) return '$' + v.toFixed(2);
+  const dp = v >= 1000 ? 2 : v >= 1 ? 3 : 4;
+  return v.toFixed(dp) + ' ' + ((data && data.symbol) || '');
+}
+
 async function fetchWin(gameNumber) {
   try {
     const r = await fetch(API_URL + '/api/wins/' + gameNumber, { cache: 'no-store' });
@@ -18,10 +26,10 @@ export async function generateMetadata({ params }) {
   if (!data) {
     return { title: 'Win on The Crazy Game', description: 'Bet, wait, win.' };
   }
-  const usd = (Number(data.jackpot_amount) / 1_000_000).toFixed(2);
+  const usd = fmtWin(data.jackpot_amount, data);
   const pnl = Number(data.pnl_percent).toLocaleString('en-US', { maximumFractionDigits: 1 });
   const title = 'Won ' + data.game_name + ' on The Crazy Game';
-  const description = '$' + usd + ' jackpot · ' + pnl + '% PnL';
+  const description = usd + ' jackpot · ' + pnl + '% PnL';
   return {
     title,
     description,
@@ -51,7 +59,7 @@ export default async function WinPage({ params }) {
     );
   }
 
-  const usd = (Number(data.jackpot_amount) / 1_000_000).toFixed(2);
+  const usd = fmtWin(data.jackpot_amount, data);
   const lastBetUsd = (Number(data.last_bet_amount) / 1_000_000).toFixed(2);
   const pnl = Number(data.pnl_percent).toLocaleString('en-US', { maximumFractionDigits: 1 });
   const refUrl = SITE_URL + '/?ref=' + (data.winner_ref_code || '');
@@ -81,7 +89,7 @@ export default async function WinPage({ params }) {
           </div>
 
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(56px, 13vw, 96px)', color: 'var(--accent)', lineHeight: 1, marginBottom: '20px' }}>
-            ${usd}
+            {usd}
           </div>
 
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(20px, 4.5vw, 32px)', color: 'var(--text-primary)', letterSpacing: '0.05em', marginBottom: '40px' }}>

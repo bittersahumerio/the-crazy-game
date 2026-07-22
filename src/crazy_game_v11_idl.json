@@ -1,0 +1,4055 @@
+{
+  "address": "craz6HFVmz7Nuk9nSD6sxH4nbXXKF1bNPjjN3dmG4FJ",
+  "metadata": {
+    "name": "crazy_game_vanilla",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "admin_force_close_game",
+      "docs": [
+        "[FIX] 30-day delay required"
+      ],
+      "discriminator": [
+        18,
+        20,
+        63,
+        149,
+        151,
+        47,
+        54,
+        38
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.host",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.name",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "platform_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.token_mint",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "host",
+          "writable": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel_pending_bet",
+      "discriminator": [
+        82,
+        221,
+        53,
+        214,
+        213,
+        192,
+        233,
+        9
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "docs": [
+            "the PDA from the supplied seeds and comparing to bet.game.",
+            "May be a live Game account or any pubkey (including a closed account)",
+            "— we only use it as the CPI authority handle."
+          ]
+        },
+        {
+          "name": "bet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bet.game",
+                "account": "Bet"
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_seed",
+                "account": "Bet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bet.game",
+                "account": "Bet"
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_seed",
+                "account": "Bet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_host",
+          "type": "pubkey"
+        },
+        {
+          "name": "game_name",
+          "type": "string"
+        },
+        {
+          "name": "game_bump",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "claim_jackpot",
+      "discriminator": [
+        28,
+        214,
+        134,
+        248,
+        249,
+        81,
+        206,
+        198
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.host",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.name",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "claimant",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "claimant_token_account",
+          "writable": true
+        },
+        {
+          "name": "game_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "burn_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  114,
+                  110,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "token_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_bet",
+      "discriminator": [
+        185,
+        206,
+        13,
+        184,
+        176,
+        108,
+        140,
+        107
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.host",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.name",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_seed",
+                "account": "Bet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "recipient",
+          "writable": true
+        },
+        {
+          "name": "caller",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_config",
+      "discriminator": [
+        145,
+        9,
+        72,
+        157,
+        95,
+        125,
+        61,
+        85
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_game",
+      "discriminator": [
+        237,
+        236,
+        157,
+        201,
+        253,
+        20,
+        248,
+        67
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.host",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.name",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "host",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "fund_game",
+      "discriminator": [
+        71,
+        9,
+        242,
+        41,
+        192,
+        23,
+        54,
+        224
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.host",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.name",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "host",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "host_token_account",
+          "writable": true
+        },
+        {
+          "name": "game_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "host_fee_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  115,
+                  116,
+                  95,
+                  102,
+                  101,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "platform_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "token_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init_platform_vault",
+      "docs": [
+        "Permissionless: create the per-mint platform fee vault. Must exist before",
+        "the first game of a given mint is created. Kept out of initialize_game so",
+        "that instruction's account-validation stack stays within the BPF 4KB limit."
+      ],
+      "discriminator": [
+        64,
+        118,
+        48,
+        45,
+        39,
+        182,
+        50,
+        177
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "platform_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "token_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_config",
+      "discriminator": [
+        208,
+        127,
+        21,
+        1,
+        194,
+        190,
+        196,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "default_fee_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "initialize_game",
+      "discriminator": [
+        44,
+        62,
+        102,
+        247,
+        126,
+        208,
+        130,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "host"
+              },
+              {
+                "kind": "arg",
+                "path": "name"
+              }
+            ]
+          }
+        },
+        {
+          "name": "initial_bet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "host",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "token_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "initial_deposit",
+          "type": "u64"
+        },
+        {
+          "name": "min_bet",
+          "type": "u64"
+        },
+        {
+          "name": "roi_bps",
+          "type": "u64"
+        },
+        {
+          "name": "timer_duration",
+          "type": "i64"
+        },
+        {
+          "name": "host_fee_bps",
+          "type": "u64"
+        },
+        {
+          "name": "timer_mode",
+          "type": "u8"
+        },
+        {
+          "name": "time_increment",
+          "type": "i64"
+        },
+        {
+          "name": "salvador_mode",
+          "type": "u8"
+        },
+        {
+          "name": "salvador_bps",
+          "type": "u16"
+        },
+        {
+          "name": "salvador_step_bps",
+          "type": "u16"
+        },
+        {
+          "name": "salvador_cap_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "pause_game",
+      "discriminator": [
+        133,
+        116,
+        165,
+        66,
+        173,
+        81,
+        10,
+        85
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.host",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.name",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "pause_platform",
+      "discriminator": [
+        232,
+        46,
+        204,
+        130,
+        181,
+        0,
+        172,
+        57
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "pay_bounty",
+      "discriminator": [
+        62,
+        122,
+        205,
+        103,
+        205,
+        81,
+        250,
+        111
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.host",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.name",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "recipient_bet",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "account",
+                "path": "recipient_bet.bet_seed",
+                "account": "Bet"
+              }
+            ]
+          },
+          "writable": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "signer": true
+        },
+        {
+          "name": "randomness",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "place_bet",
+      "discriminator": [
+        222,
+        62,
+        67,
+        220,
+        63,
+        166,
+        126,
+        33
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.host",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.name",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "arg",
+                "path": "bet_seed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "arg",
+                "path": "bet_seed"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "player_token_account",
+          "writable": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "_bet_seed",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "process_bet",
+      "discriminator": [
+        218,
+        75,
+        216,
+        73,
+        71,
+        206,
+        196,
+        113
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.host",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.name",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_seed",
+                "account": "Bet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_seed",
+                "account": "Bet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "platform_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.token_mint",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "host_vault",
+          "writable": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "signer": true
+        },
+        {
+          "name": "bettor",
+          "writable": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "remove_token_fee",
+      "discriminator": [
+        117,
+        180,
+        47,
+        252,
+        100,
+        201,
+        21,
+        20
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "mint",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "reserve_roi",
+      "discriminator": [
+        13,
+        37,
+        132,
+        36,
+        89,
+        91,
+        37,
+        93
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.host",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.name",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_seed",
+                "account": "Bet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "caller",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_jackpot_fee",
+      "discriminator": [
+        254,
+        173,
+        144,
+        55,
+        157,
+        89,
+        108,
+        137
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "jackpot_fee_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "set_operator",
+      "discriminator": [
+        238,
+        153,
+        101,
+        169,
+        243,
+        131,
+        36,
+        1
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "operator",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_token_config",
+      "discriminator": [
+        158,
+        231,
+        35,
+        78,
+        98,
+        32,
+        210,
+        196
+      ],
+      "accounts": [
+        {
+          "name": "token_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "token_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "min_bet_floor",
+          "type": "u64"
+        },
+        {
+          "name": "random_min_pool",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_token_fee",
+      "discriminator": [
+        219,
+        237,
+        16,
+        50,
+        227,
+        85,
+        231,
+        243
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "fee_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "unpause_game",
+      "discriminator": [
+        52,
+        251,
+        30,
+        83,
+        140,
+        62,
+        220,
+        243
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.host",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.name",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "unpause_platform",
+      "discriminator": [
+        167,
+        253,
+        251,
+        188,
+        221,
+        230,
+        32,
+        165
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_default_fee",
+      "discriminator": [
+        158,
+        171,
+        96,
+        160,
+        151,
+        60,
+        226,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "default_fee_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "withdraw",
+      "discriminator": [
+        183,
+        18,
+        70,
+        156,
+        148,
+        109,
+        161,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.host",
+                "account": "Game"
+              },
+              {
+                "kind": "account",
+                "path": "game.name",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_seed",
+                "account": "Bet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player_token_account",
+          "writable": true
+        },
+        {
+          "name": "game_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "withdraw_burn_vault",
+      "docs": [
+        "Admin withdraws accumulated jackpot fees from a per-mint burn vault",
+        "(for burning CRAZY or swapping other tokens to CRAZY then burning)"
+      ],
+      "discriminator": [
+        87,
+        184,
+        183,
+        73,
+        108,
+        208,
+        226,
+        242
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "burn_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  114,
+                  110,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "burn_vault.mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_platform_fees",
+      "docs": [
+        "Admin withdraws accumulated platform fees from a per-mint vault"
+      ],
+      "discriminator": [
+        87,
+        24,
+        138,
+        122,
+        62,
+        146,
+        186,
+        199
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "platform_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "platform_vault.mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "operator_withdraw_platform_fees",
+      "accounts": [
+        {
+          "name": "config"
+        },
+        {
+          "name": "operator",
+          "signer": true
+        },
+        {
+          "name": "platform_vault",
+          "writable": true
+        },
+        {
+          "name": "operator_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ],
+      "discriminator": [
+        17,
+        70,
+        49,
+        79,
+        126,
+        216,
+        73,
+        34
+      ]
+    },
+    {
+      "name": "claim_bounty",
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true
+        },
+        {
+          "name": "bet",
+          "writable": true
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player_token_account",
+          "writable": true
+        },
+        {
+          "name": "game_vault",
+          "writable": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [],
+      "discriminator": [
+        225,
+        157,
+        163,
+        238,
+        239,
+        169,
+        75,
+        226
+      ]
+    },
+    {
+      "name": "init_escrow_vault",
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "escrow_vault",
+          "writable": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program"
+        },
+        {
+          "name": "rent"
+        }
+      ],
+      "args": [],
+      "discriminator": [
+        101,
+        173,
+        96,
+        250,
+        37,
+        150,
+        102,
+        48
+      ]
+    },
+    {
+      "name": "sweep_unclaimed_bet",
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true
+        },
+        {
+          "name": "bet",
+          "writable": true
+        },
+        {
+          "name": "game_vault",
+          "writable": true
+        },
+        {
+          "name": "escrow_vault",
+          "writable": true
+        },
+        {
+          "name": "claim_ticket",
+          "writable": true
+        },
+        {
+          "name": "caller",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [],
+      "discriminator": [
+        124,
+        195,
+        32,
+        162,
+        210,
+        229,
+        178,
+        100
+      ]
+    },
+    {
+      "name": "sweep_unclaimed_jackpot",
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true
+        },
+        {
+          "name": "game_vault",
+          "writable": true
+        },
+        {
+          "name": "escrow_vault",
+          "writable": true
+        },
+        {
+          "name": "claim_ticket",
+          "writable": true
+        },
+        {
+          "name": "caller",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [],
+      "discriminator": [
+        81,
+        242,
+        95,
+        83,
+        234,
+        228,
+        178,
+        122
+      ]
+    },
+    {
+      "name": "claim_unclaimed",
+      "accounts": [
+        {
+          "name": "claim_ticket",
+          "writable": true
+        },
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "escrow_vault",
+          "writable": true
+        },
+        {
+          "name": "player_token_account",
+          "writable": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [],
+      "discriminator": [
+        83,
+        180,
+        69,
+        217,
+        176,
+        246,
+        35,
+        175
+      ]
+    },
+    {
+      "name": "onboard_token",
+      "accounts": [
+        {
+          "name": "creator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "bonding_curve"
+        },
+        {
+          "name": "token_config",
+          "writable": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "fee_destination",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [],
+      "discriminator": [
+        78,
+        240,
+        7,
+        71,
+        25,
+        192,
+        118,
+        171
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Bet",
+      "discriminator": [
+        147,
+        23,
+        35,
+        59,
+        15,
+        75,
+        155,
+        32
+      ]
+    },
+    {
+      "name": "Game",
+      "discriminator": [
+        27,
+        90,
+        166,
+        125,
+        74,
+        100,
+        121,
+        18
+      ]
+    },
+    {
+      "name": "PlatformConfig",
+      "discriminator": [
+        160,
+        78,
+        128,
+        0,
+        248,
+        83,
+        230,
+        160
+      ]
+    },
+    {
+      "name": "TokenConfig",
+      "discriminator": [
+        92,
+        73,
+        255,
+        43,
+        107,
+        51,
+        117,
+        101
+      ]
+    },
+    {
+      "name": "ClaimTicket",
+      "discriminator": [
+        239,
+        28,
+        188,
+        14,
+        190,
+        134,
+        159,
+        174
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "BetCancelled",
+      "discriminator": [
+        32,
+        179,
+        128,
+        184,
+        125,
+        193,
+        106,
+        104
+      ]
+    },
+    {
+      "name": "BetClosed",
+      "discriminator": [
+        122,
+        20,
+        157,
+        254,
+        221,
+        0,
+        39,
+        129
+      ]
+    },
+    {
+      "name": "BetPlaced",
+      "discriminator": [
+        88,
+        88,
+        145,
+        226,
+        126,
+        206,
+        32,
+        0
+      ]
+    },
+    {
+      "name": "BetQueued",
+      "discriminator": [
+        92,
+        208,
+        68,
+        128,
+        92,
+        222,
+        137,
+        244
+      ]
+    },
+    {
+      "name": "BountyPaid",
+      "discriminator": [
+        60,
+        72,
+        10,
+        171,
+        122,
+        59,
+        238,
+        148
+      ]
+    },
+    {
+      "name": "BurnVaultWithdrawn",
+      "discriminator": [
+        90,
+        240,
+        2,
+        139,
+        200,
+        130,
+        13,
+        120
+      ]
+    },
+    {
+      "name": "GameClosed",
+      "discriminator": [
+        178,
+        203,
+        179,
+        224,
+        43,
+        18,
+        209,
+        4
+      ]
+    },
+    {
+      "name": "GameCreated",
+      "discriminator": [
+        218,
+        25,
+        150,
+        94,
+        177,
+        112,
+        96,
+        2
+      ]
+    },
+    {
+      "name": "GameFunded",
+      "discriminator": [
+        135,
+        59,
+        22,
+        51,
+        65,
+        80,
+        191,
+        155
+      ]
+    },
+    {
+      "name": "JackpotClaimed",
+      "discriminator": [
+        141,
+        206,
+        247,
+        184,
+        235,
+        71,
+        241,
+        231
+      ]
+    },
+    {
+      "name": "PlatformFeesWithdrawn",
+      "discriminator": [
+        21,
+        216,
+        172,
+        170,
+        221,
+        168,
+        147,
+        193
+      ]
+    },
+    {
+      "name": "PlayerWithdrew",
+      "discriminator": [
+        148,
+        107,
+        50,
+        109,
+        222,
+        237,
+        34,
+        250
+      ]
+    },
+    {
+      "name": "RoiReserved",
+      "discriminator": [
+        46,
+        0,
+        135,
+        248,
+        158,
+        45,
+        30,
+        54
+      ]
+    },
+    {
+      "name": "BountyClaimed",
+      "discriminator": [
+        140,
+        202,
+        21,
+        51,
+        211,
+        65,
+        142,
+        21
+      ]
+    },
+    {
+      "name": "OperatorFeesWithdrawn",
+      "discriminator": [
+        205,
+        87,
+        177,
+        239,
+        161,
+        53,
+        84,
+        236
+      ]
+    },
+    {
+      "name": "UnclaimedSwept",
+      "discriminator": [
+        20,
+        92,
+        19,
+        237,
+        135,
+        103,
+        255,
+        168
+      ]
+    },
+    {
+      "name": "UnclaimedClaimed",
+      "discriminator": [
+        144,
+        75,
+        1,
+        203,
+        64,
+        184,
+        207,
+        168
+      ]
+    },
+    {
+      "name": "TokenOnboarded",
+      "discriminator": [
+        23,
+        223,
+        120,
+        70,
+        45,
+        26,
+        112,
+        250
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidName",
+      "msg": "Invalid game name — must be 3-30 characters"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidDeposit",
+      "msg": "Invalid initial deposit"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidMinBet",
+      "msg": "Invalid minimum bet"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidRoi",
+      "msg": "Invalid ROI — must be between 10% and 100%"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidTimer",
+      "msg": "Invalid timer duration"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidHostFee",
+      "msg": "Invalid host fee — must be between 1% and 5%"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidTimerMode",
+      "msg": "Invalid timer mode"
+    },
+    {
+      "code": 6007,
+      "name": "FarmingProtection",
+      "msg": "Game parameters too easy to farm"
+    },
+    {
+      "code": 6008,
+      "name": "GameNotActive",
+      "msg": "Game is not active"
+    },
+    {
+      "code": 6009,
+      "name": "BetTooSmall",
+      "msg": "Bet amount is below minimum"
+    },
+    {
+      "code": 6010,
+      "name": "TimerExpired",
+      "msg": "Timer has expired"
+    },
+    {
+      "code": 6011,
+      "name": "RoiNotReached",
+      "msg": "ROI target not yet reached"
+    },
+    {
+      "code": 6012,
+      "name": "AlreadyReserved",
+      "msg": "Bet already reserved"
+    },
+    {
+      "code": 6013,
+      "name": "AlreadyWithdrawn",
+      "msg": "Bet already withdrawn"
+    },
+    {
+      "code": 6014,
+      "name": "NotReserved",
+      "msg": "Bet is not reserved"
+    },
+    {
+      "code": 6015,
+      "name": "Unauthorized",
+      "msg": "Unauthorized"
+    },
+    {
+      "code": 6016,
+      "name": "NotLastBettor",
+      "msg": "Only the last bettor can claim the jackpot"
+    },
+    {
+      "code": 6017,
+      "name": "JackpotAlreadyClaimed",
+      "msg": "Jackpot already claimed"
+    },
+    {
+      "code": 6018,
+      "name": "JackpotDelayNotMet",
+      "msg": "Jackpot delay not yet met — wait 5 minutes after timer expires"
+    },
+    {
+      "code": 6019,
+      "name": "EmptyJackpot",
+      "msg": "Jackpot is empty"
+    },
+    {
+      "code": 6020,
+      "name": "InvalidFee",
+      "msg": "Invalid fee — must be between 0% and 10%"
+    },
+    {
+      "code": 6021,
+      "name": "TooManyTokenFees",
+      "msg": "Too many token fee overrides"
+    },
+    {
+      "code": 6022,
+      "name": "InvalidHostVault",
+      "msg": "Invalid host vault"
+    },
+    {
+      "code": 6023,
+      "name": "PlatformPaused",
+      "msg": "Platform is paused"
+    },
+    {
+      "code": 6024,
+      "name": "GamePaused",
+      "msg": "Game is paused"
+    },
+    {
+      "code": 6025,
+      "name": "JackpotNotClaimed",
+      "msg": "Jackpot must be claimed before closing game"
+    },
+    {
+      "code": 6026,
+      "name": "PoolNotEmpty",
+      "msg": "Pool must be empty before closing game"
+    },
+    {
+      "code": 6027,
+      "name": "BetNotCloseable",
+      "msg": "Bet cannot be closed yet"
+    },
+    {
+      "code": 6028,
+      "name": "InvalidBountyAmount",
+      "msg": "Invalid bounty amount"
+    },
+    {
+      "code": 6029,
+      "name": "InsufficientPoolForBounty",
+      "msg": "Insufficient pool for bounty"
+    },
+    {
+      "code": 6030,
+      "name": "BetNotProcessed",
+      "msg": "Bet is still pending — not yet processed"
+    },
+    {
+      "code": 6031,
+      "name": "BetNotPending",
+      "msg": "Bet is not pending"
+    },
+    {
+      "code": 6032,
+      "name": "BountyRecipientMismatch",
+      "msg": "Bounty recipient does not match bet player"
+    },
+    {
+      "code": 6033,
+      "name": "ForceCloseDelayNotMet",
+      "msg": "Force close not available yet — wait 30 days after game ends"
+    },
+    {
+      "code": 6034,
+      "name": "InvalidSalvadorMode",
+      "msg": "Invalid Salvador mode — must be 0 (off), 1 (fixed), or 2 (progressive)"
+    },
+    {
+      "code": 6035,
+      "name": "InvalidSalvadorBps",
+      "msg": "Invalid Salvador bounty parameters"
+    },
+    {
+      "code": 6036,
+      "name": "InvalidGameSeeds",
+      "msg": "Invalid game seeds — supplied (host, name, bump) do not derive to bet.game"
+    },
+    {
+      "code": 6037,
+      "name": "GameNotFunded",
+      "msg": "Game is not funded yet"
+    },
+    {
+      "code": 6038,
+      "name": "AlreadyFunded",
+      "msg": "Game is already funded"
+    },
+    {
+      "code": 6039,
+      "name": "UnsupportedMintExtension",
+      "msg": "Unsupported token mint extension — transfer fee / hook / etc. are not allowed"
+    },
+    {
+      "code": 6040,
+      "name": "SalvadorDisabled",
+      "msg": "Salvador bounty is disabled for this game (mode 0)"
+    },
+    {
+      "code": 6041,
+      "name": "BountyExceedsCap",
+      "msg": "Bounty exceeds the Salvador cap for the unreserved pool"
+    },
+    {
+      "code": 6042,
+      "name": "MinBetBelowFloor",
+      "msg": "Min bet is below the per-token floor"
+    },
+    {
+      "code": 6043,
+      "name": "RandomNotAllowedForToken",
+      "msg": "This token is not enabled for random Salvador"
+    },
+    {
+      "code": 6044,
+      "name": "PoolBelowRandomThreshold",
+      "msg": "Initial pool is below the random-Salvador threshold"
+    },
+    {
+      "code": 6045,
+      "name": "BadRandomnessAccount",
+      "msg": "Randomness account is invalid — wrong owner or not bound to this salvation"
+    },
+    {
+      "code": 6046,
+      "name": "RandomnessNotFulfilled",
+      "msg": "ORAO randomness is not fulfilled yet"
+    },
+    {
+      "code": 6047,
+      "name": "NoBountyOwed",
+      "msg": "No bounty owed on this bet"
+    },
+    {
+      "code": 6048,
+      "name": "GracePeriodNotMet",
+      "msg": "Grace period not met — cannot sweep unclaimed funds yet"
+    },
+    {
+      "code": 6049,
+      "name": "NothingToSweep",
+      "msg": "Nothing to sweep on this bet"
+    },
+    {
+      "code": 6050,
+      "name": "NothingToClaim",
+      "msg": "Nothing to claim"
+    },
+    {
+      "code": 6051,
+      "name": "MintAuthorityNotRenounced",
+      "msg": "Mint authority not renounced"
+    },
+    {
+      "code": 6052,
+      "name": "FreezeAuthorityNotRenounced",
+      "msg": "Freeze authority not renounced"
+    },
+    {
+      "code": 6053,
+      "name": "InvalidBondingCurve",
+      "msg": "Invalid pump.fun bonding curve for this mint"
+    },
+    {
+      "code": 6054,
+      "name": "TokenMigrated",
+      "msg": "Token has migrated off its bonding curve — onboard via the curated path"
+    }
+  ],
+  "types": [
+    {
+      "name": "Bet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "bet_index",
+            "type": "u64"
+          },
+          {
+            "name": "bet_seed",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "net_amount",
+            "type": "u64"
+          },
+          {
+            "name": "roi_target",
+            "type": "u64"
+          },
+          {
+            "name": "accumulated_base",
+            "type": "u64"
+          },
+          {
+            "name": "cumulative_at_join",
+            "type": "u64"
+          },
+          {
+            "name": "queued_at",
+            "type": "i64"
+          },
+          {
+            "name": "is_pending",
+            "type": "bool"
+          },
+          {
+            "name": "reserved",
+            "type": "bool"
+          },
+          {
+            "name": "withdrawn",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "bounty_owed",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BetCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "bet_seed",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BetClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "bet_index",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BetPlaced",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "bet_index",
+            "type": "u64"
+          },
+          {
+            "name": "bet_seed",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "net_amount",
+            "type": "u64"
+          },
+          {
+            "name": "timer_end",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BetQueued",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "bet_seed",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "queued_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BountyPaid",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "bet_index",
+            "type": "u64"
+          },
+          {
+            "name": "bet_seed",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BurnVaultWithdrawn",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Game",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "host",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "token_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "initial_deposit",
+            "type": "u64"
+          },
+          {
+            "name": "pool_amount",
+            "type": "u64"
+          },
+          {
+            "name": "min_bet",
+            "type": "u64"
+          },
+          {
+            "name": "roi_bps",
+            "type": "u64"
+          },
+          {
+            "name": "timer_duration",
+            "type": "i64"
+          },
+          {
+            "name": "host_fee_bps",
+            "type": "u64"
+          },
+          {
+            "name": "platform_fee_bps",
+            "type": "u64"
+          },
+          {
+            "name": "timer_mode",
+            "type": "u8"
+          },
+          {
+            "name": "time_increment",
+            "type": "i64"
+          },
+          {
+            "name": "start_time",
+            "type": "i64"
+          },
+          {
+            "name": "timer_end",
+            "type": "i64"
+          },
+          {
+            "name": "pool_balance",
+            "type": "u64"
+          },
+          {
+            "name": "reserved_balance",
+            "type": "u64"
+          },
+          {
+            "name": "cumulative_per_bet",
+            "type": "u64"
+          },
+          {
+            "name": "last_bettor",
+            "type": "pubkey"
+          },
+          {
+            "name": "bet_count",
+            "type": "u64"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "is_paused",
+            "type": "bool"
+          },
+          {
+            "name": "jackpot_claimed",
+            "type": "bool"
+          },
+          {
+            "name": "platform_fees_collected",
+            "type": "u64"
+          },
+          {
+            "name": "active_bet_count",
+            "type": "u64"
+          },
+          {
+            "name": "host_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "salvador_mode",
+            "type": "u8"
+          },
+          {
+            "name": "salvador_bps",
+            "type": "u16"
+          },
+          {
+            "name": "salvador_step_bps",
+            "type": "u16"
+          },
+          {
+            "name": "salvador_cap_bps",
+            "type": "u16"
+          },
+          {
+            "name": "salvador_count",
+            "type": "u64"
+          },
+          {
+            "name": "funded",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "host",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "token_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "initial_deposit",
+            "type": "u64"
+          },
+          {
+            "name": "min_bet",
+            "type": "u64"
+          },
+          {
+            "name": "roi_bps",
+            "type": "u64"
+          },
+          {
+            "name": "timer_duration",
+            "type": "i64"
+          },
+          {
+            "name": "host_fee_bps",
+            "type": "u64"
+          },
+          {
+            "name": "platform_fee_bps",
+            "type": "u64"
+          },
+          {
+            "name": "timer_mode",
+            "type": "u8"
+          },
+          {
+            "name": "time_increment",
+            "type": "i64"
+          },
+          {
+            "name": "salvador_mode",
+            "type": "u8"
+          },
+          {
+            "name": "salvador_bps",
+            "type": "u16"
+          },
+          {
+            "name": "salvador_step_bps",
+            "type": "u16"
+          },
+          {
+            "name": "salvador_cap_bps",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameFunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "net_deposit",
+            "type": "u64"
+          },
+          {
+            "name": "platform_fee",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "JackpotClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "claimant",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "gross_jackpot",
+            "type": "u64"
+          },
+          {
+            "name": "jackpot_fee",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlatformConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "operator",
+            "type": "pubkey"
+          },
+          {
+            "name": "default_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "jackpot_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "token_fees",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "TokenFee"
+                }
+              }
+            }
+          },
+          {
+            "name": "is_paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlatformFeesWithdrawn",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerWithdrew",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "bet_index",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoiReserved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "bet_index",
+            "type": "u64"
+          },
+          {
+            "name": "roi_target",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "min_bet_floor",
+            "type": "u64"
+          },
+          {
+            "name": "random_min_pool",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenFee",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ClaimTicket",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BountyClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "bet_index",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OperatorFeesWithdrawn",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "operator",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UnclaimedSwept",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UnclaimedClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenOnboarded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "min_bet_floor",
+            "type": "u64"
+          },
+          {
+            "name": "random_min_pool",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -36,7 +36,7 @@ const s = {
   loginBox: { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', padding: '40px', width: '360px', textAlign: 'center' },
 };
 
-const TABS = ['STATS', 'GAMES', 'LEADERBOARD', 'AIRDROP', 'MODERATION', 'MODERATORS', 'SUPPORT', 'ROADMAP', 'TRAFFIC', 'ON-CHAIN'];
+const TABS = ['STATS', 'GAMES', 'TOKENS', 'LEADERBOARD', 'AIRDROP', 'MODERATION', 'MODERATORS', 'SUPPORT', 'ROADMAP', 'TRAFFIC', 'ON-CHAIN'];
 const TICKET_STATUS_COLOR = {
   open: { bg: 'var(--status-open-bg)', color: 'var(--status-open-fg)' },
   answered: { bg: 'var(--status-warn-bg)', color: 'var(--status-warn-fg)' },
@@ -60,6 +60,7 @@ export default function ClaroscuroPage() {
   const [balance, setBalance] = useState(null);
   const [treasury, setTreasury] = useState(null);
   const [games, setGames] = useState([]);
+  const [tokens, setTokens] = useState([]);
   const [gameSearch, setGameSearch] = useState('');
   const [currentWeek, setCurrentWeek] = useState(null);
   const [topupAmount, setTopupAmount] = useState('');
@@ -123,6 +124,8 @@ export default function ClaroscuroPage() {
         setStats(st); setBalance(b); setTreasury(tr);
       } else if (t === 'GAMES') {
         const d = await adminFetch('/games'); setGames(d.games);
+      } else if (t === 'TOKENS') {
+        const d = await adminFetch('/tokens'); setTokens(d.tokens || []);
       } else if (t === 'LEADERBOARD') {
         const [d, cw] = await Promise.all([
           fetch(`${API_URL}/api/leaderboard`).then(r => r.json()),
@@ -330,6 +333,74 @@ export default function ClaroscuroPage() {
             <button style={s.btn('secondary')} onClick={async () => { if (!confirm('Restart ALL games?')) return; await adminFetch('/restart', { method: 'POST' }); alert('Platform restarted'); }}>RESTART PLATFORM</button>
           </div>
         </div>
+        <div style={s.card}>
+          <div style={s.cardTitle}>FEE MANAGEMENT</div>
+          <div style={{ fontSize: '13px', opacity: 0.7, marginBottom: '12px' }}>
+            Sweep accumulated USDC platform fees from the on-chain vault to the treasury (the wallet that funds leaderboard / Heat / referral payouts). Previews the amount before you confirm.
+          </div>
+          <button style={s.btn()} onClick={async () => {
+            const preview = await adminFetch('/transfer-fees', { method: 'POST', body: JSON.stringify({ amount: 'all', dryRun: true }) });
+            if (!preview.amount_base_units) return alert('USDC vault is empty — nothing to sweep.');
+            if (!confirm(`Sweep ${preview.amount_usdc} USDC from the platform vault to the treasury?`)) return;
+            const r = await adminFetch('/transfer-fees', { method: 'POST', body: JSON.stringify({ amount: 'all', dryRun: false }) });
+            alert(r.ok ? `Swept ${r.amount_usdc} USDC to the treasury.${r.sig ? '\nTx: ' + r.sig : ''}` : `Transfer failed:\n${(r.output || r.error || 'unknown').slice(-300)}`);
+          }}>SWEEP USDC FEES → TREASURY</button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderTokens() {
+    const fmtAmt = (raw, dec) => raw == null ? '-' : (Number(raw) / Math.pow(10, dec == null ? 0 : dec)).toLocaleString('en-US', { maximumFractionDigits: 6 });
+    return (
+      <div style={s.card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div style={s.cardTitle}>ONBOARDED TOKENS ({tokens.length})</div>
+          <button style={s.btn('secondary')} onClick={() => loadTab('TOKENS')}>REFRESH</button>
+        </div>
+        <table style={s.table}>
+          <thead><tr>
+            <th style={s.th}>TOKEN</th><th style={s.th}>MINT</th><th style={s.th}>DEC</th><th style={s.th}>FEE</th>
+            <th style={s.th}>MIN BET</th><th style={s.th}>RANDOM POOL</th><th style={s.th}>GAMES</th><th style={s.th}>ACTIONS</th>
+          </tr></thead>
+          <tbody>
+            {tokens.map(t => (
+              <tr key={t.mint}>
+                <td style={s.td}><strong>{t.symbol || '?'}</strong>{t.name ? <span style={{ color: 'var(--text-secondary)', marginLeft: '6px' }}>{t.name}</span> : null}</td>
+                <td style={s.td}><span style={{ color: 'var(--text-secondary)', fontSize: '11px' }}>{t.mint.slice(0, 4) + '..' + t.mint.slice(-4)}</span></td>
+                <td style={s.td}>{t.decimals == null ? '-' : t.decimals}</td>
+                <td style={s.td}>{t.fee_bps == null ? '-' : (t.fee_bps / 100) + '%'}</td>
+                <td style={s.td}>{fmtAmt(t.min_bet_floor, t.decimals)} {t.symbol || ''}</td>
+                <td style={s.td}>{fmtAmt(t.random_min_pool, t.decimals)} {t.symbol || ''}</td>
+                <td style={s.td}>{t.games}{t.active_games ? <span style={{ ...s.badge('green'), marginLeft: '6px' }}>{t.active_games} live</span> : null}</td>
+                <td style={s.td}>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button style={s.btn('secondary')} onClick={async () => {
+                      const v = prompt('New fee % for ' + (t.symbol || t.mint.slice(0, 4)) + ' (0-20):', String(t.fee_bps != null ? t.fee_bps / 100 : ''));
+                      if (v == null) return;
+                      const bps = Math.round(parseFloat(v) * 100);
+                      if (!(bps >= 0 && bps <= 2000)) { alert('Fee must be 0-20%'); return; }
+                      if (!confirm('Set ' + (t.symbol || '') + ' fee to ' + (bps / 100) + '% on-chain (operator-signed)?')) return;
+                      const r = await adminFetch('/tokens/' + t.mint + '/fee', { method: 'POST', body: JSON.stringify({ fee_bps: bps }) });
+                      alert(r.ok ? ('Fee set to ' + (bps / 100) + '%. tx ' + String(r.sig || '').slice(0, 8)) : ('Failed: ' + (r.error || '?')));
+                      loadTab('TOKENS');
+                    }}>FEE</button>
+                    <button style={s.btn('secondary')} onClick={async () => {
+                      const pv = await adminFetch('/tokens/' + t.mint + '/repeg', { method: 'POST', body: JSON.stringify({ dryRun: true }) });
+                      if (!pv.ok) { alert('Cannot re-peg: ' + (pv.error || '?')); return; }
+                      const f = (raw) => (Number(raw) / Math.pow(10, t.decimals || 0)).toLocaleString('en-US', { maximumFractionDigits: 6 });
+                      if (!confirm('Re-peg ' + (t.symbol || '') + '? Min bet ' + f(pv.before.min_bet_floor) + ' to ' + f(pv.after.min_bet_floor) + ', pool ' + f(pv.before.random_min_pool) + ' to ' + f(pv.after.random_min_pool) + ' (on-chain, operator-signed)')) return;
+                      const r = await adminFetch('/tokens/' + t.mint + '/repeg', { method: 'POST', body: JSON.stringify({ dryRun: false }) });
+                      alert(r.ok ? ('Re-pegged. tx ' + String(r.sig || '').slice(0, 8)) : ('Failed: ' + (r.error || '?')));
+                      loadTab('TOKENS');
+                    }}>RE-PEG</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--text-muted)' }}>Read-only for now; re-peg (adjust floors) is the next step.</div>
       </div>
     );
   }
@@ -358,10 +429,31 @@ export default function ClaroscuroPage() {
                 </td>
                 <td style={s.td}>${((parseInt(g.pool_balance) || 0) / 1_000_000).toFixed(2)}</td>
                 <td style={s.td}>
-                  <div style={{ display: 'flex', gap: '6px' }}>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                     {g.is_active && <button style={s.btn('danger')} onClick={async () => { await adminFetch(`/games/${g.id}/pause`, { method: 'POST' }); loadTab('GAMES'); }}>PAUSE</button>}
                     {!g.is_active && <button style={s.btn('secondary')} onClick={async () => { await adminFetch(`/games/${g.id}/restart`, { method: 'POST' }); loadTab('GAMES'); }}>RESTART</button>}
                     <button style={s.btn('secondary')} onClick={async () => { await adminFetch(`/games/${g.id}/recover`, { method: 'POST' }); alert('Recovery triggered'); }}>RECOVER</button>
+                    {g.image_url && <img src={g.image_url} alt="" style={{ width: '28px', height: '28px', objectFit: 'cover', borderRadius: '4px' }} />}
+                    {g.image_url && <button style={s.btn('danger')} onClick={async () => { if (!confirm('Remove this game image? The file is deleted.')) return; await adminFetch(`/games/${g.id}/image`, { method: 'DELETE' }); loadTab('GAMES'); }}>CLEAR IMG</button>}
+                    {/* [2026-07-19] Admin can SET/REPLACE a game's card image. The create-flow upload is the only
+                        other path, so a game whose GameCreated was missed (upload 404s while unindexed) had no way
+                        to ever get its image. Posts to the same no-signature /api/games/:id/image endpoint. */}
+                    <label style={{ ...s.btn('secondary'), cursor: 'pointer', display: 'inline-block' }}>
+                      {g.image_url ? 'REPLACE IMG' : 'SET IMG'}
+                      <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" style={{ display: 'none' }} onChange={async (e) => {
+                        const f = e.target.files && e.target.files[0];
+                        if (!f) return;
+                        e.target.value = '';
+                        const fd = new FormData();
+                        fd.append('image', f);
+                        try {
+                          const r = await fetch(`${API_URL}/api/games/${g.id}/image`, { method: 'POST', body: fd });
+                          const j = await r.json().catch(() => ({}));
+                          if (r.ok) { alert('Image set for #' + g.game_number); loadTab('GAMES'); }
+                          else alert('Upload failed: ' + (j.error || r.status));
+                        } catch (err) { alert('Upload failed: ' + (err.message || err)); }
+                      }} />
+                    </label>
                   </div>
                 </td>
               </tr>
@@ -382,9 +474,12 @@ export default function ClaroscuroPage() {
     setExpandedWeek(weekId);
   }
 
-  async function payAllForWeek(weekId, totalOwedRaw, unpaidCount) {
-    const totalUsd = (Number(totalOwedRaw) / 1_000_000).toFixed(2);
-    if (!confirm('Pay ' + unpaidCount + ' winner(s) totaling $' + totalUsd + ' USDC from the treasury?')) return;
+  async function payAllForWeek(weekId, totalOwedRaw, unpaidCount, potCurrency) {
+    const isSol = potCurrency === 'sol';
+    const amt = isSol
+      ? (Number(totalOwedRaw) / 1_000_000_000).toFixed(4) + ' SOL'
+      : '$' + (Number(totalOwedRaw) / 1_000_000).toFixed(2) + ' USDC';
+    if (!confirm('Pay ' + unpaidCount + ' winner(s) totaling ' + amt + ' from the treasury?')) return;
 
     setPayoutBusy(weekId);
     try {
@@ -413,15 +508,15 @@ export default function ClaroscuroPage() {
         {currentWeek ? (
           <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
             <div>Start: {new Date(currentWeek.week_start).toLocaleDateString()}</div>
-            <div>Pot: ${((parseInt(currentWeek.pot_amount) || 0) / 1_000_000).toFixed(2)} USDC</div>
-            <div>Rollover: ${((parseInt(currentWeek.rollover_amount) || 0) / 1_000_000).toFixed(2)} USDC</div>
+            <div>Pot: ◎{((parseInt(currentWeek.pot_sol_amount) || 0) / 1_000_000_000).toFixed(3)} SOL</div>
+            {/* rollover folded into the SOL pot at close */}
           </div>
         ) : <div style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '16px' }}>No active week</div>}
         <div style={s.row}>
-          <input style={{ ...s.input, width: '160px' }} placeholder="Top-up amount (USDC)" value={topupAmount} onChange={e => setTopupAmount(e.target.value)} />
-          <button style={s.btn()} onClick={async () => { const usd = parseFloat(topupAmount); if (!usd || usd <= 0) return alert('Enter a valid USDC amount'); if (!confirm('Top up the pot by $' + usd + ' USDC? This only updates the ledger — you must transfer this amount manually to the treasury.')) return; await adminFetch('/leaderboard/topup', { method: 'POST', body: JSON.stringify({ amount: usd }) }); setTopupAmount(''); loadTab('LEADERBOARD'); alert('Pot updated by $' + usd); }}>TOP UP</button>
+          <input style={{ ...s.input, width: '160px' }} placeholder="Top-up amount (SOL)" value={topupAmount} onChange={e => setTopupAmount(e.target.value)} />
+          <button style={s.btn()} onClick={async () => { const sol = parseFloat(topupAmount); if (!sol || sol <= 0) return alert('Enter a valid SOL amount'); if (!confirm('Top up the pot by ' + sol + ' SOL? This only updates the ledger — send this SOL to the treasury DarbQGMDtnnZWN2XaEsEWbaWshHiuTLajJQ2z8Tcdhia manually.')) return; await adminFetch('/leaderboard/topup', { method: 'POST', body: JSON.stringify({ amount: sol }) }); setTopupAmount(''); loadTab('LEADERBOARD'); alert('Pot updated by ' + sol + ' SOL'); }}>TOP UP</button>
         </div>
-        <button style={s.btn('danger')} onClick={async () => { if (!confirm('Close current week and distribute rewards?')) return; await adminFetch('/leaderboard/close-week', { method: 'POST' }); loadTab('LEADERBOARD'); alert('Week closed!'); }}>CLOSE WEEK</button>
+        <button style={s.btn('danger')} onClick={async () => { if (!confirm('Close the current week and distribute SOL rewards now? (the hourly cron normally does this at week end)')) return; const r = await adminFetch('/leaderboard/close-week', { method: 'POST', body: JSON.stringify({ weekId: currentWeek?.id }) }); if (r && r.success) { alert('Week closed.'); } else { alert('Not closed: ' + ((r && (r.reason || r.error)) || 'unknown')); } loadTab('LEADERBOARD'); }}>CLOSE WEEK</button>
 
         {closedWeeks.length > 0 && (
           <div style={{ marginTop: '32px' }}>
@@ -438,8 +533,12 @@ export default function ClaroscuroPage() {
               </thead>
               <tbody>
                 {closedWeeks.map(w => {
-                  const unpaidUsd = (Number(w.unpaid_amount) / 1_000_000).toFixed(2);
-                  const totalUsd = (Number(w.pot_amount) / 1_000_000).toFixed(2);
+                  const isSol = w.pot_currency === 'sol';
+                  const fmt = (raw) => isSol
+                    ? (Number(raw) / 1_000_000_000).toFixed(4) + ' ◎'
+                    : '$' + (Number(raw) / 1_000_000).toFixed(2);
+                  const unpaidDisp = fmt(w.unpaid_amount);
+                  const potDisp = fmt(isSol ? w.pot_sol_amount : w.pot_amount);
                   const isBusy = payoutBusy === w.id;
                   const isExpanded = expandedWeek === w.id;
                   const entries = weekEntries[w.id] || [];
@@ -450,17 +549,17 @@ export default function ClaroscuroPage() {
                         <button onClick={() => toggleWeekDetails(w.id)} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0 6px', fontSize: '14px' }}>{isExpanded ? '▼' : '▶'}</button>
                         {new Date(w.week_start).toLocaleDateString()}
                       </td>
-                      <td style={s.td}>${totalUsd}</td>
+                      <td style={s.td}>{potDisp}</td>
                       <td style={s.td}>{w.paid_count}/{w.total_winners} paid</td>
-                      <td style={s.td}>{w.unpaid_count} owed ${unpaidUsd}</td>
+                      <td style={s.td}>{w.unpaid_count} owed {unpaidDisp}</td>
                       <td style={s.td}>
                         {w.unpaid_count > 0 ? (
                           <button
                             style={{ ...s.btn(), opacity: isBusy ? 0.5 : 1 }}
                             disabled={isBusy || payoutBusy !== null}
-                            onClick={() => payAllForWeek(w.id, w.unpaid_amount, w.unpaid_count)}
+                            onClick={() => payAllForWeek(w.id, w.unpaid_amount, w.unpaid_count, w.pot_currency)}
                           >
-                            {isBusy ? 'PAYING…' : ('PAY ' + w.unpaid_count + ' ($' + unpaidUsd + ')')}
+                            {isBusy ? 'PAYING…' : ('PAY ' + w.unpaid_count + ' (' + unpaidDisp + ')')}
                           </button>
                         ) : (
                           <span style={{ color: 'var(--accent)', fontSize: '11px', letterSpacing: '0.05em' }}>✓ ALL PAID</span>
@@ -483,12 +582,12 @@ export default function ClaroscuroPage() {
                             <tbody>
                               {entries.length === 0 && <tr><td colSpan={5} style={{ ...s.td, color: 'var(--text-muted)', textAlign: 'center' }}>Loading…</td></tr>}
                               {entries.map(e => {
-                                const rewardUsd = (Number(e.reward) / 1_000_000).toFixed(2);
+                                const rewardDisp = fmt(e.reward);
                                 return (
                                   <tr key={e.id}>
                                     <td style={{ ...s.td, paddingLeft: '24px', color: 'var(--text-muted)' }}>#{e.rank}</td>
                                     <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '11px' }}>{e.player.slice(0, 8)}…{e.player.slice(-6)}</td>
-                                    <td style={s.td}>${rewardUsd}</td>
+                                    <td style={s.td}>{rewardDisp}</td>
                                     <td style={s.td}>
                                       {e.paid_at ? <span style={{ color: 'var(--accent)' }}>✓ PAID</span> : <span style={{ color: 'var(--text-muted)' }}>UNPAID</span>}
                                     </td>
@@ -922,7 +1021,7 @@ export default function ClaroscuroPage() {
     );
   }
 
-  const renderMap = { STATS: renderStats, GAMES: renderGames, LEADERBOARD: renderLeaderboard, AIRDROP: renderAirdrop, MODERATION: renderModeration, MODERATORS: renderModerators, SUPPORT: renderSupport, ROADMAP: renderRoadmap, TRAFFIC: renderTraffic, 'ON-CHAIN': renderOnChain };
+  const renderMap = { STATS: renderStats, GAMES: renderGames, TOKENS: renderTokens, LEADERBOARD: renderLeaderboard, AIRDROP: renderAirdrop, MODERATION: renderModeration, MODERATORS: renderModerators, SUPPORT: renderSupport, ROADMAP: renderRoadmap, TRAFFIC: renderTraffic, 'ON-CHAIN': renderOnChain };
 
   return (
     <div style={s.page}>

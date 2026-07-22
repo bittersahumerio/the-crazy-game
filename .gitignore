@@ -8,3 +8,23 @@ node_modules/
 # backups & one-off scripts
 *.bak*
 *.py
+
+# [secret-hygiene 2026-07-11] never commit env files, their backups, or keys
+.env
+.env.*
+*.env
+*keypair*.json
+deploy-authority*.json
+
+# --- secret-file catch-all (added 2026-07-22) ---
+# `*keypair*.json` did NOT match `deployer.json` / `mb-spike-deployer.json`, both of which held a real
+# 64-byte secret key and were about to be committed. Filename-matching is fragile for secrets — widen it,
+# and ALWAYS content-scan a diff before a bulk commit.
+*deployer*.json
+*authority*.json
+*signer*.json
+*-wallet.json
+wallet*.json
+id.json
+*.pem
+*.key
